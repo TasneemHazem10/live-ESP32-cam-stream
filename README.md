@@ -451,7 +451,7 @@ firmware/
   esp32cam-streamer/    ESP32-CAM RGB565 uploader
   esp32-sensor-node/    ESP32 38-pin telemetry node
 tools/                  Simulators and test suites
-docs/                   API reference + Arabic deployment guide
+docs/                   API reference + English/Arabic deployment guides
 render.yaml             Render Blueprint
 Dockerfile              Container build
 ```
@@ -462,4 +462,5 @@ Dockerfile              Container build
 
 MIT © 2026 MIRSAD. See [LICENSE](LICENSE).
 
-للدليل العربي خطوة بخطوة، راجع [`docs/DEPLOY-AR.md`](docs/DEPLOY-AR.md).
+For a more detailed English walkthrough, see [`docs/DEPLOY-EN.md`](docs/DEPLOY-EN.md).
+For the Arabic step-by-step guide, see [`docs/DEPLOY-AR.md`](docs/DEPLOY-AR.md).
