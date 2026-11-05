@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: mirsad-live
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_FALLBACK
+        value: "true"
+      - key: DEMO_FPS
+        value: "8"
+      - key: JPEG_QUALITY
+        value: "80"
+      - key: FRAME_WIDTH
+        value: "320"
+      - key: FRAME_HEIGHT
+        value: "240"
+      - key: FRAME_FORMAT
+        value: rgb565le
+      - key: MAX_FRAME_BYTES
+        value: "2097152"
+      - key: FRAME_STALE_MS
+        value: "5000"
+      - key: MAX_WEBRTC_PEERS
+        value: "4"
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: TRUST_PROXY
+        value: "true"
+      # Secrets: Render asks for these during Blueprint creation.
+      - key: UPLOAD_TOKEN
+        sync: false
+      - key: METERED_DOMAIN
+        sync: false
+      - key: METERED_API_KEY
+        sync: false
+      - key: METERED_REGION
+        sync: false

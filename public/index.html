@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#05060f" />
+    <meta name="description" content="MIRSAD — live ESP32-CAM streaming, browser vision filters and ESP32 sensor telemetry on one dashboard." />
+    <meta name="mirsad-api-base" content="" />
+    <title>MIRSAD — بث ESP32-CAM ومستشعرات مباشرة</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script type="module" src="/js/app.js"></script>
+  </head>
+  <body>
+    <div class="scroll-progress" aria-hidden="true"><span id="progress-bar"></span></div>
+
+    <div class="bg-layer" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="orb orb-c"></span>
+      <span class="bg-grid"></span>
+      <span class="bg-noise"></span>
+    </div>
+
+    <header class="site-header" id="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="#top" aria-label="MIRSAD">
+          <span class="brand-mark"><svg class="icon"><use href="#i-eye"></use></svg></span>
+          <span class="brand-text">
+            <strong>MIRSAD</strong>
+            <small data-i18n="brand.sub">مرصد</small>
+          </span>
+        </a>
+
+        <nav class="main-nav" id="main-nav" aria-label="Primary">
+          <a href="#top" data-i18n="nav.home">الرئيسية</a>
+          <a href="#studio" data-i18n="nav.studio">الاستوديو</a>
+          <a href="#sensors" data-i18n="nav.sensors">المستشعرات</a>
+          <a href="#architecture" data-i18n="nav.how">كيف يعمل</a>
+          <a href="#start" class="nav-cta" data-i18n="nav.cta">افتح اللوحة</a>
+        </nav>
+
+        <div class="header-actions">
+          <button class="status-pill" id="server-pill" type="button">
+            <span class="dot"></span>
+            <span id="server-pill-text" data-i18n="status.connecting">جارٍ الاتصال</span>
+          </button>
+          <button class="lang-btn" id="lang-toggle" type="button" aria-label="Switch language">
+            <svg class="icon"><use href="#i-globe"></use></svg>
+            <span class="lang-label">EN</span>
+          </button>
+          <button class="menu-btn" id="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav" aria-label="Menu">
+            <svg class="icon"><use href="#i-menu"></use></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <span class="eyebrow reveal"><span class="pulse-dot"></span><span data-i18n="hero.eyebrow">منصة إنترنت الأشياء المتكاملة</span></span>
+            <h1 class="reveal" style="--i: 1" data-i18n-html="hero.title">
+              شاهد الميدان،<br /><span class="grad">واقرأ ما لا يُرى.</span>
+            </h1>
+            <p class="hero-sub reveal" style="--i: 2" data-i18n="hero.sub">
+              بث مباشر من ESP32-CAM، تحليل بصري فوري، وقراءات مستشعرات حية من ESP32 — كل ذلك في لوحة واحدة تعمل من أي متصفح.
+            </p>
+            <div class="hero-actions reveal" style="--i: 3">
+              <a class="btn btn-primary" href="#studio">
+                <svg class="icon"><use href="#i-play"></use></svg>
+                <span data-i18n="hero.cta1">افتح البث المباشر</span>
+              </a>
+              <a class="btn btn-ghost" href="#sensors">
+                <svg class="icon"><use href="#i-activity"></use></svg>
+                <span data-i18n="hero.cta2">استكشف المستشعرات</span>
+              </a>
+            </div>
+            <div class="hero-badges reveal" style="--i: 4">
+              <span class="chip"><svg class="icon"><use href="#i-expand"></use></svg><span data-i18n="hero.badge1">دقة 320×240</span></span>
+              <span class="chip"><svg class="icon"><use href="#i-activity"></use></svg><span data-i18n="hero.badge2">حتى 15 إطار/ث</span></span>
+              <span class="chip"><svg class="icon"><use href="#i-globe"></use></svg><span data-i18n="hero.badge3">WebRTC + TURN</span></span>
+              <span class="chip"><svg class="icon"><use href="#i-chip"></use></svg><span data-i18n="hero.badge4">RGB565 خام</span></span>
+            </div>
+          </div>
+
+          <div class="hero-visual reveal" style="--i: 2">
+            <div class="orbit orbit-a" aria-hidden="true"><span></span></div>
+            <div class="orbit orbit-b" aria-hidden="true"><span></span></div>
+            <div class="orbit orbit-c" aria-hidden="true"><span></span></div>
+
+            <div class="preview-card tilt">
+              <div class="preview-head">
+                <span class="preview-title"><span class="dot"></span><span data-i18n="hero.cardTitle">MIRSAD / LIVE</span></span>
+                <span class="preview-time" id="hero-clock">--:--</span>
+              </div>
+              <div class="preview-stage">
+                <canvas id="hero-canvas" width="480" height="360" aria-label="Live camera preview"></canvas>
+                <span class="preview-scan" aria-hidden="true"></span>
+                <div class="preview-hud">
+                  <span class="hud-chip"><b id="hero-fps">--</b> FPS</span>
+                  <span class="hud-chip"><b id="hero-latency">--</b> ms</span>
+                  <span class="hud-chip source" id="hero-source">DEMO</span>
+                </div>
+                <div class="preview-note" data-i18n="hero.previewNote">محاكي الإشارة يعمل الآن — اربط الكاميرا للبث الحقيقي.</div>
+              </div>
+              <div class="preview-foot">
+                <span>ESP32-CAM · RHYX-M21-45</span>
+                <span class="signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              </div>
+            </div>
+
+            <div class="float-chip float-a"><svg class="icon"><use href="#i-droplet"></use></svg><span data-i18n="hero.float1">مؤشر الماء</span></div>
+            <div class="float-chip float-b"><svg class="icon"><use href="#i-thermometer"></use></svg><span data-i18n="hero.float2">حرارة 26.4°</span></div>
+            <div class="float-chip float-c"><svg class="icon"><use href="#i-globe"></use></svg><span data-i18n="hero.float3">TURN جاهز</span></div>
+          </div>
+        </div>
+
+        <div class="container">
+          <div class="stats-strip reveal">
+            <div class="stat">
+              <span class="stat-value" id="stat-fps">--</span>
+              <span class="stat-label" data-i18n="stats.fps">الإطارات / ث</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="stat-latency">--</span>
+              <span class="stat-label" data-i18n="stats.latency">التأخير</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" data-count="8">0</span>
+              <span class="stat-label" data-i18n="stats.effects">تأثيرات بصرية</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" data-count="6">0</span>
+              <span class="stat-label" data-i18n="stats.sensors">مستشعرات</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="capabilities">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="cap.kicker">القدرات</span>
+              <h2 data-i18n="cap.title">من الإشارة إلى القرار</h2>
+            </div>
+            <p data-i18n="cap.sub">سلسلة كاملة مصممة للعمل فوق شبكات المنازل والمؤسسات — دون الحاجة إلى IP عام للكاميرا.</p>
+          </div>
+
+          <div class="cap-grid">
+            <article class="cap-card glass reveal" style="--i: 0">
+              <span class="cap-number">01</span>
+              <span class="cap-icon cyan"><svg class="icon"><use href="#i-bolt"></use></svg></span>
+              <h3 data-i18n="cap.1.title">بث منخفض التأخير</h3>
+              <p data-i18n="cap.1.body">يُحوَّل إطار RGB565 الخام إلى JPEG على الخادم، ثم يُوزَّع عبر WebSocket أو MJPEG أو WebRTC.</p>
+              <span class="cap-tags"><i>RGB565</i><i>JPEG</i><i>WebRTC</i></span>
+            </article>
+
+            <article class="cap-card glass reveal" style="--i: 1">
+              <span class="cap-number">02</span>
+              <span class="cap-icon lime"><svg class="icon"><use href="#i-sparkles"></use></svg></span>
+              <h3 data-i18n="cap.2.title">رؤية قابلة للتفسير</h3>
+              <p data-i18n="cap.2.body">ثمانية مرشحات فورية: مؤشر الماء، صحة النبات، خريطة حرارية، رؤية ليلية، حواف، وتدرج سينمائي.</p>
+              <span class="cap-tags"><i>NDWI</i><i>Thermal</i><i>Sobel</i></span>
+            </article>
+
+            <article class="cap-card glass reveal" style="--i: 2">
+              <span class="cap-number">03</span>
+              <span class="cap-icon violet"><svg class="icon"><use href="#i-activity"></use></svg></span>
+              <h3 data-i18n="cap.3.title">دمج المستشعرات</h3>
+              <p data-i18n="cap.3.body">حرارة، رطوبة، تربة، إضاءة، جودة هواء وحركة — تصل كل ثانيتين وتُعرض كرسوم متحركة.</p>
+              <span class="cap-tags"><i>ESP32</i><i>JSON</i><i>WebSocket</i></span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section studio" id="studio">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="studio.kicker">LIVE STUDIO</span>
+              <h2 data-i18n="studio.title">استوديو الرؤية الحية</h2>
+              <p data-i18n="studio.sub">اختر تأثيرًا بصريًا، التقط لقطة، أو بدّل مسار البث — دون إعادة تحميل الصفحة.</p>
+            </div>
+            <div class="head-pills">
+              <span class="pill" id="camera-pill"><span class="dot"></span><span id="camera-pill-text" data-i18n="status.waiting">بانتظار الإشارة</span></span>
+              <span class="pill subtle" id="turn-pill"><svg class="icon"><use href="#i-globe"></use></svg><span id="turn-pill-text">STUN</span></span>
+            </div>
+          </div>
+
+          <div class="studio-grid">
+            <div class="stage-card glass reveal">
+              <div class="stage-top">
+                <div class="device-id">
+                  <span class="device-orb"><svg class="icon"><use href="#i-camera"></use></svg></span>
+                  <div>
+                    <strong data-i18n="studio.device">ESP32-CAM</strong>
+                    <span data-i18n="studio.model">RHYX-M21-45 · 320×240</span>
+                  </div>
+                </div>
+                <div class="stage-badges">
+                  <span class="badge" id="source-badge">DEMO</span>
+                  <span class="badge rec"><span class="rec-dot"></span><span data-i18n="studio.rec">REC</span></span>
+                </div>
+              </div>
+
+              <div class="video-wrap" id="video-wrap">
+                <canvas id="video-canvas" width="960" height="720" aria-label="Live ESP32-CAM stream"></canvas>
+                <span class="video-scanlines" aria-hidden="true"></span>
+                <span class="video-vignette" aria-hidden="true"></span>
+                <span class="video-grid" id="video-grid" aria-hidden="true"></span>
+
+                <div class="video-hud">
+                  <span class="hud-item"><small data-i18n="hud.effect">التأثير</small><b id="hud-effect">Original</b></span>
+                  <span class="hud-item"><small data-i18n="hud.fps">FPS</small><b id="studio-fps">--</b></span>
+                  <span class="hud-item"><small data-i18n="hud.latency">تأخير</small><b id="studio-latency">--</b></span>
+                  <span class="hud-item"><small data-i18n="hud.mode">المسار</small><b id="studio-mode">WS</b></span>
+                </div>
+
+                <span class="video-time" id="video-time">--:--:--</span>
+
+                <div class="video-wait" id="video-wait">
+                  <div class="wait-rings"><span></span><span></span><span></span></div>
+                  <strong data-i18n="studio.waitTitle">بانتظار إشارة الكاميرا</strong>
+                  <p data-i18n="studio.waitSub">الخادم جاهز. شغّل ESP32-CAM أو المحاكي لعرض البث.</p>
+                  <code>POST /api/upload-frame</code>
+                </div>
+
+                <button class="expand-btn" id="fullscreen-btn" type="button" data-i18n-title="studio.fullscreen" title="Fullscreen" aria-label="Fullscreen">
+                  <svg class="icon"><use href="#i-expand"></use></svg>
+                </button>
+              </div>
+
+              <div class="stage-controls">
+                <div class="control-row">
+                  <div class="mode-switch" role="group" aria-label="Transport">
+                    <button class="mode-btn is-active" data-mode="ws" type="button">WebSocket</button>
+                    <button class="mode-btn" data-mode="webrtc" type="button">WebRTC</button>
+                    <button class="mode-btn" data-mode="mjpeg" type="button">MJPEG</button>
+                    <button class="mode-btn" data-mode="poll" type="button">HTTP</button>
+                  </div>
+                  <div class="icon-actions">
+                    <button class="icon-btn" id="snapshot-btn" type="button" data-i18n-title="studio.snapshot" title="Snapshot" aria-label="Snapshot">
+                      <svg class="icon"><use href="#i-snapshot"></use></svg>
+                    </button>
+                    <button class="icon-btn" id="mirror-btn" type="button" data-i18n-title="studio.mirror" title="Mirror" aria-label="Mirror">
+                      <svg class="icon"><use href="#i-mirror"></use></svg>
+                    </button>
+                    <button class="icon-btn" id="grid-btn" type="button" data-i18n-title="studio.grid" title="Grid" aria-label="Grid">
+                      <svg class="icon"><use href="#i-grid"></use></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="control-row intensity-row">
+                  <label for="intensity">
+                    <span data-i18n="studio.intensity">شدة التأثير</span>
+                    <b id="intensity-value">100%</b>
+                  </label>
+                  <input id="intensity" type="range" min="0" max="100" value="100" step="1" />
+                </div>
+              </div>
+
+              <div class="stage-metrics">
+                <div><span data-i18n="metric.fps">الإطارات/ث</span><b id="metric-fps">--</b></div>
+                <div><span data-i18n="metric.latency">التأخير</span><b id="metric-latency">--</b></div>
+                <div><span data-i18n="metric.bitrate">معدل البث</span><b id="metric-bitrate">--</b></div>
+                <div><span data-i18n="metric.resolution">الدقة</span><b id="metric-resolution">320×240</b></div>
+                <div><span data-i18n="metric.frames">الإطارات</span><b id="metric-frames">--</b></div>
+              </div>
+            </div>
+
+            <aside class="effects-card glass reveal" style="--i: 1">
+              <div class="effects-head">
+                <div>
+                  <span class="kicker">VISION FX</span>
+                  <h3 data-i18n="studio.effects">تأثيرات الرؤية</h3>
+                  <p data-i18n="studio.effectsSub">ثمانية مرشحات تعمل داخل المتصفح</p>
+                </div>
+                <button class="ghost-mini" id="tour-btn" type="button">
+                  <svg class="icon"><use href="#i-sparkles"></use></svg>
+                  <span data-i18n="studio.tour">جولة تلقائية</span>
+                </button>
+              </div>
+              <div class="effect-list" id="effect-list" role="radiogroup" aria-label="Vision effects"></div>
+              <div class="effects-note">
+                <svg class="icon"><use href="#i-shield"></use></svg>
+                <span data-i18n="studio.note">كل المعالجة تتم محليًا داخل المتصفح — لا تُرسل الصور إلى أي خدمة خارجية.</span>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="sensors">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="sensors.kicker">TELEMETRY</span>
+              <h2 data-i18n="sensors.title">نبض المستشعرات</h2>
+              <p data-i18n="sensors.sub">قراءات ESP32 38-pin تتحدث كل ثانيتين. الرسوم تتحرك معك في الوقت الحقيقي.</p>
+            </div>
+            <div class="head-pills">
+              <span class="pill" id="sensor-pill"><span class="dot"></span><span id="sensor-pill-text" data-i18n="sensors.offline">بانتظار المستشعر</span></span>
+            </div>
+          </div>
+
+          <div class="sensor-layout">
+            <div class="chart-card glass reveal">
+              <div class="chart-head">
+                <div>
+                  <span class="kicker">STREAM</span>
+                  <h3 data-i18n="sensors.chartTitle">تدفق القراءات</h3>
+                  <p data-i18n="sensors.chartSub">آخر 3 دقائق</p>
+                </div>
+                <div class="chart-legend">
+                  <span><i class="dot temp"></i><span data-i18n="sensor.legend.temperature">حرارة</span></span>
+                  <span><i class="dot hum"></i><span data-i18n="sensor.legend.humidity">رطوبة</span></span>
+                  <span><i class="dot soil"></i><span data-i18n="sensor.legend.soil">تربة</span></span>
+                </div>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="sensor-chart" height="260" aria-label="Sensor telemetry chart"></canvas>
+              </div>
+              <div class="chart-foot">
+                <span id="sensor-device">ESP32-SENSOR-01</span>
+                <span class="chart-updated"><span data-i18n="sensors.updated">آخر تحديث</span> <b id="sensor-updated">--</b></span>
+              </div>
+            </div>
+
+            <div class="sensor-grid" id="sensor-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="arch.kicker">ARCHITECTURE</span>
+              <h2 data-i18n="arch.title">كيف تعبر الإشارة</h2>
+            </div>
+            <p data-i18n="arch.sub">من شبكة المنزل إلى المتصفح — مسار واضح، بلا IP عام ولا منافذ مفتوحة.</p>
+          </div>
+
+          <div class="flow reveal">
+            <article class="flow-node glass">
+              <span class="flow-index">01</span>
+              <span class="flow-icon cyan"><svg class="icon"><use href="#i-camera"></use></svg></span>
+              <h3 data-i18n="arch.1.title">ESP32-CAM</h3>
+              <p data-i18n="arch.1.body">يلتقط 320×240 RGB565 ويرسل 153.6KB لكل إطار عبر HTTP POST صادر.</p>
+              <div class="flow-tags"><span data-i18n="arch.1.tag1">RHYX-M21-45</span><span data-i18n="arch.1.tag2">RGB565</span></div>
+            </article>
+            <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
+            <article class="flow-node glass">
+              <span class="flow-index">02</span>
+              <span class="flow-icon lime"><svg class="icon"><use href="#i-render"></use></svg></span>
+              <h3 data-i18n="arch.2.title">MIRSAD Relay</h3>
+              <p data-i18n="arch.2.body">خدمة Node.js على Render تحوّل RGB565 إلى JPEG وتوزّع الإطارات على كل المشاهدين.</p>
+              <div class="flow-tags"><span data-i18n="arch.2.tag1">Render</span><span data-i18n="arch.2.tag2">Node.js</span></div>
+            </article>
+            <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
+            <article class="flow-node glass">
+              <span class="flow-index">03</span>
+              <span class="flow-icon violet"><svg class="icon"><use href="#i-globe"></use></svg></span>
+              <h3 data-i18n="arch.3.title">طبقة النقل</h3>
+              <p data-i18n="arch.3.body">WebSocket أو MJPEG أو WebRTC DataChannel، مع TURN من Metered لتجاوز NAT.</p>
+              <div class="flow-tags"><span data-i18n="arch.3.tag1">WebRTC</span><span data-i18n="arch.3.tag2">Metered TURN</span></div>
+            </article>
+            <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
+            <article class="flow-node glass">
+              <span class="flow-index">04</span>
+              <span class="flow-icon amber"><svg class="icon"><use href="#i-monitor"></use></svg></span>
+              <h3 data-i18n="arch.4.title">المتصفح</h3>
+              <p data-i18n="arch.4.body">كانفاس للمرشحات الفورية، ولوحة مستشعرات حية، وتصدير لقطة بضغطة واحدة.</p>
+              <div class="flow-tags"><span data-i18n="arch.4.tag1">Canvas FX</span><span data-i18n="arch.4.tag2">Zero install</span></div>
+            </article>
+          </div>
+
+          <div class="flow-note reveal">
+            <span class="flow-note-icon"><svg class="icon"><use href="#i-wifi"></use></svg></span>
+            <p data-i18n="arch.note">في الشبكات المقيّدة (NAT / CGNAT) يمرّ WebRTC عبر TURN بدل الاتصال المباشر.</p>
+            <span class="flow-note-pill"><svg class="icon"><use href="#i-activity"></use></svg><span data-i18n="arch.sensors">ESP32 38-pin يرسل JSON كل ثانيتين إلى نفس الخادم</span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="start">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="start.kicker">QUICK START</span>
+              <h2 data-i18n="start.title">شغّلها في ثلاث خطوات</h2>
+              <p data-i18n="start.sub">من المستودع إلى لوحة حية — كل ما تحتاجه مثبت مسبقًا في المشروع.</p>
+            </div>
+          </div>
+
+          <div class="step-grid">
+            <article class="step-card glass reveal" style="--i: 0">
+              <span class="step-num">1</span>
+              <h3 data-i18n="start.1.title">شغّل الخادم</h3>
+              <p data-i18n="start.1.body">جرّب كل شيء محليًا خلال ثوانٍ، مع محاكي كاميرا ومستشعرات مدمج.</p>
+              <div class="code-block">
+                <code>npm install &amp;&amp; npm start</code>
+                <button class="copy-btn" type="button" data-copy="npm install &amp;&amp; npm start" data-i18n-title="start.copy" title="Copy">
+                  <svg class="icon"><use href="#i-copy"></use></svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="step-card glass reveal" style="--i: 1">
+              <span class="step-num">2</span>
+              <h3 data-i18n="start.2.title">انشر على Render</h3>
+              <p data-i18n="start.2.body">اربط مستودع GitHub، ثم أضف متغيرات Metered TURN للشبكات المقيّدة.</p>
+              <div class="code-block">
+                <code>Build: npm ci · Start: npm start</code>
+                <button class="copy-btn" type="button" data-copy="Build: npm ci · Start: npm start" data-i18n-title="start.copy" title="Copy">
+                  <svg class="icon"><use href="#i-copy"></use></svg>
+                </button>
+              </div>
+            </article>
+
+            <article class="step-card glass reveal" style="--i: 2">
+              <span class="step-num">3</span>
+              <h3 data-i18n="start.3.title">اربط الكاميرا</h3>
+              <p data-i18n="start.3.body">الصق رابط الرفع في كود ESP32-CAM. لا يحتاج الجهاز إلى IP عام.</p>
+              <div class="code-block">
+                <code class="js-upload-endpoint">/api/upload-frame</code>
+                <button class="copy-btn" type="button" data-copy-target="upload-endpoint" data-i18n-title="start.copy" title="Copy">
+                  <svg class="icon"><use href="#i-copy"></use></svg>
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div class="endpoint-card glass reveal">
+            <div class="endpoint-copy">
+              <span class="kicker">INGEST</span>
+              <h3 data-i18n="start.endpoint">نقطة الرفع</h3>
+              <p>POST · application/octet-stream · 320×240 RGB565 · 153,600 bytes</p>
+            </div>
+            <div class="endpoint-value">
+              <code id="upload-endpoint" class="js-upload-endpoint">/api/upload-frame</code>
+              <button class="copy-btn" type="button" data-copy-target="upload-endpoint">
+                <svg class="icon"><use href="#i-copy"></use></svg>
+                <span data-i18n="start.copy">نسخ</span>
+              </button>
+            </div>
+            <div class="endpoint-links">
+              <a class="btn btn-ghost small" href="/firmware/esp32cam-streamer/esp32cam-streamer.ino" download>
+                <svg class="icon"><use href="#i-download"></use></svg>
+                <span data-i18n="start.firmware">تنزيل كود الكاميرا</span>
+              </a>
+              <a class="btn btn-ghost small" href="/firmware/esp32-sensor-node/esp32-sensor-node.ino" download>
+                <svg class="icon"><use href="#i-cpu"></use></svg>
+                <span data-i18n="start.firmwareSensors">تنزيل كود المستشعرات</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="#top" aria-label="MIRSAD">
+            <span class="brand-mark"><svg class="icon"><use href="#i-eye"></use></svg></span>
+            <span class="brand-text"><strong>MIRSAD</strong><small data-i18n="brand.sub">مرصد</small></span>
+          </a>
+          <p data-i18n="footer.tagline">رؤية ذكية. بيانات حية. قرار أسرع.</p>
+          <div class="footer-tech">
+            <span>Node.js</span><span>Render</span><span>Metered</span><span>ESP32</span>
+          </div>
+        </div>
+        <div class="footer-links">
+          <div>
+            <h4 data-i18n="footer.dashboard">اللوحة</h4>
+            <a href="#studio" data-i18n="nav.studio">الاستوديو</a>
+            <a href="#sensors" data-i18n="nav.sensors">المستشعرات</a>
+            <a href="#architecture" data-i18n="nav.how">كيف يعمل</a>
+          </div>
+          <div>
+            <h4 data-i18n="footer.docs">المستندات</h4>
+            <a href="#start" data-i18n="start.docs">دليل التشغيل الكامل</a>
+            <a href="#start" data-i18n="start.endpoint">نقطة الرفع</a>
+            <a href="#start" data-i18n="start.firmware">تنزيل كود الكاميرا</a>
+            <a href="#start" data-i18n="start.firmwareSensors">تنزيل كود المستشعرات</a>
+          </div>
+          <div>
+            <h4 data-i18n="footer.stack">التقنيات</h4>
+            <span>RGB565 → JPEG</span>
+            <span>WebSocket · MJPEG</span>
+            <span>WebRTC · TURN</span>
+            <span>Canvas FX</span>
+          </div>
+        </div>
+      </div>
+      <div class="container footer-bottom">
+        <span>© <span id="year">2026</span> MIRSAD. <span data-i18n="footer.rights">جميع الحقوق محفوظة.</span></span>
+        <span data-i18n="footer.built">مبني على Node.js · Render · Metered</span>
+      </div>
+    </footer>
+
+    <div class="toast-stack" id="toast-stack" role="status" aria-live="polite"></div>
+
+    <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.7"/></symbol>
+        <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 3s6 6.2 6 10a6 6 0 0 1-12 0c0-3.8 6-10 6-10Z"/><path d="M9.6 14.2a2.8 2.8 0 0 0 2.4 2.6"/></symbol>
+        <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 4c-8 .2-14 4-14 10a5 5 0 0 0 5 5c6 0 9.2-6.5 9-15Z"/><path d="M4 21c1.5-5 5.5-8 10-10"/></symbol>
+        <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M10 14.5V5a2 2 0 1 1 4 0v9.5a4.5 4.5 0 1 1-4 0Z"/><path d="M12 17.5v-5"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"/></symbol>
+        <symbol id="i-edges" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M9 9h6v6H9z"/></symbol>
+        <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+        <symbol id="i-invert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/></symbol>
+        <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+        <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/><rect x="10" y="10" width="4" height="4" rx="1"/></symbol>
+        <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a14 14 0 0 1 19 0M5.5 12a9.5 9.5 0 0 1 13 0M8.5 15.5a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-7 5 14L17 12h4"/></symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+        <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></symbol>
+        <symbol id="i-motion" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 12 19 5M12 3a9 9 0 1 0 9 9"/></symbol>
+        <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+        <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7-11-7Z" fill="currentColor" stroke="none"/></symbol>
+        <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5"/></symbol>
+        <symbol id="i-snapshot" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4V8Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+        <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 6 3 12l5 6M16 6l5 6-5 6"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+        <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></symbol>
+        <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></symbol>
+        <symbol id="i-render" viewBox="0 0 24 24"><path d="m12 3 8 4.6v8.8L12 21l-8-4.6V7.6L12 3Z"/><path d="m4 7.6 8 4.6 8-4.6M12 12.2V21"/></symbol>
+        <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+        <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      </defs>
+    </svg>
+  </body>
+</html>

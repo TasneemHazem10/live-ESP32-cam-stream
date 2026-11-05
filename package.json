@@ -1,0 +1,40 @@
+{
+  "name": "mirsad-live",
+  "version": "1.0.0",
+  "description": "MIRSAD — real-time ESP32-CAM video relay, vision filters and ESP32 sensor dashboard.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "sim:camera": "node tools/simulate-camera.js",
+    "sim:sensors": "node tools/simulate-sensors.js",
+    "test:e2e": "node tools/e2e-check.js",
+    "test:ui": "node tools/ui-check.js",
+    "test:webrtc": "node tools/webrtc-check.js"
+  },
+  "keywords": [
+    "esp32-cam",
+    "rgb565",
+    "mjpeg",
+    "webrtc",
+    "iot",
+    "sensors",
+    "render"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "compression": "^1.8.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jpeg-js": "^0.4.4",
+    "werift": "^0.26.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.1"
+  }
+}
