@@ -1,5 +1,7 @@
 # MIRSAD · مرصد
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/TasneemHazem10/live-ESP32-cam-stream)
+
 **Live ESP32-CAM vision dashboard with browser effects, WebRTC/TURN transport and ESP32 sensor telemetry.**
 
 MIRSAD accepts raw **RGB565** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker), converts
@@ -324,17 +326,20 @@ Never commit `.env`. Only `.env.example` belongs in the repository.
 
 ### 2. Deploy the relay on Render
 
-**Blueprint (recommended):**
+**One-click Blueprint** for this repository:
 
-1. Open **https://dashboard.render.com/** → **New** → **Blueprint**.
-2. Connect GitHub and select the repository containing `render.yaml`.
-3. Review the `mirsad-live` service and click **Apply**.
-4. When prompted, provide:
-   - `UPLOAD_TOKEN` — generate a long random value (for example `openssl rand -hex 24`).
-     You can leave it empty while testing, but set it before exposing the camera.
-   - `METERED_DOMAIN`, `METERED_API_KEY`, `METERED_REGION` — optional now; can be added later.
+<https://render.com/deploy?repo=https://github.com/TasneemHazem10/live-ESP32-cam-stream>
+
+1. Sign in to Render with GitHub and authorize access to the repository.
+2. Render reads `render.yaml` and shows the **mirsad-live** service.
+3. Click **Apply**.
+4. Render **auto-generates `UPLOAD_TOKEN`**. After the service is created, open
+   **Dashboard → mirsad-live → Environment** and copy the token. Paste it into the ESP32 sketch.
 5. Wait for the build (`npm ci`) and deploy (`npm start`). The health check is `/healthz`.
 6. Open the generated `https://YOUR-SERVICE.onrender.com` URL.
+
+`METERED_DOMAIN`, `METERED_API_KEY` and `METERED_REGION` are optional; add them later under
+**Environment** if you need TURN (see [section 3](#3-enable-metered-turn)).
 
 **Manual service instead of a Blueprint:**
 
