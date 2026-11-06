@@ -1,4 +1,3 @@
-# MIRSAD · مرصد
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/TasneemHazem10/live-ESP32-cam-stream)
 
