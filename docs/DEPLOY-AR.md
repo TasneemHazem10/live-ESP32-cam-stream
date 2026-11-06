@@ -140,16 +140,15 @@ git status
 3. اربط حساب GitHub واختر المستودع الذي رفعت إليه المشروع.
 4. سيتعرّف Render على ملف `render.yaml` ويعرض خدمة باسم **mirsad-live**.
 5. راجع الإعدادات ثم اضغط **Apply**.
-6. قد يطلب منك إدخال القيم السرية التالية:
-   - `UPLOAD_TOKEN` — كلمة سر طويلة (انظر طريقة توليدها أدناه). يمكن تركها فارغة أثناء
-     التجربة فقط.
-   - `METERED_DOMAIN` و`METERED_API_KEY` و`METERED_REGION` — اتركها فارغة الآن إن لم تُنشئ
-     حساب Metered، وأضفها لاحقًا.
-7. انتظر انتهاء **Build** ثم **Deploy**. الأمران المستخدمان:
+6. يولّد Render قيمة **`UPLOAD_TOKEN`** تلقائيًا. بعد إنشاء الخدمة افتح
+   **Dashboard → الخدمة → Environment** وانسخ القيمة — ستضعها في كود ESP32.
+7. المتغيرات `METERED_DOMAIN` و`METERED_API_KEY` و`METERED_REGION` اختيارية. اتركها فارغة
+   الآن (WebRTC عبر STUN فقط) وأضفها لاحقًا إذا احتجت TURN.
+8. انتظر انتهاء **Build** ثم **Deploy**. الأمران المستخدمان:
    - Build: `npm ci`
    - Start: `npm start`
    - Health check: `/healthz`
-8. افتح الرابط الذي يظهر بالشكل:
+9. افتح الرابط الذي يظهر بالشكل:
 
    ```text
    https://mirsad-live.onrender.com

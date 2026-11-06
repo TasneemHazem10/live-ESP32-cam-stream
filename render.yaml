@@ -25,7 +25,7 @@ services:
       - key: FRAME_HEIGHT
         value: "240"
       - key: FRAME_FORMAT
-        value: rgb565le
+        value: rgb565be
       - key: MAX_FRAME_BYTES
         value: "2097152"
       - key: FRAME_STALE_MS
@@ -36,9 +36,12 @@ services:
         value: "*"
       - key: TRUST_PROXY
         value: "true"
-      # Secrets: Render asks for these during Blueprint creation.
+      # Render generates a random token. Copy it into the ESP32 sketch as
+      # UPLOAD_TOKEN so only your camera can post frames.
       - key: UPLOAD_TOKEN
-        sync: false
+        generateValue: true
+      # Optional TURN (Metered). Leave unset for STUN-only WebRTC.
+      # Add these later in Dashboard → Environment if you need TURN.
       - key: METERED_DOMAIN
         sync: false
       - key: METERED_API_KEY

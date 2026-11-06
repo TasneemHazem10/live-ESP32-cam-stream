@@ -159,12 +159,12 @@ One Render web service serves both the frontend and the API.
 3. Connect GitHub and select the repository.
 4. Render detects `render.yaml` and shows the **mirsad-live** service.
 5. Review the settings and click **Apply**.
-6. When prompted for secrets, provide:
-   - `UPLOAD_TOKEN` — a long random value (see below). You may leave it empty for a quick
-     test, but set it before exposing the camera.
-   - `METERED_DOMAIN`, `METERED_API_KEY`, `METERED_REGION` — leave blank for now if you have
-     not created a Metered app; add them later.
-7. Wait for the build and deploy. Render uses:
+6. Render **auto-generates `UPLOAD_TOKEN`** for you. After the service is created, open
+   **Dashboard → your service → Environment** and copy the token — you will paste it into the
+   ESP32 sketch.
+7. `METERED_DOMAIN`, `METERED_API_KEY`, `METERED_REGION` are optional. Leave them blank for
+   now (STUN-only WebRTC) and add them later if you need TURN.
+8. Wait for the build and deploy. Render uses:
 
    ```text
    Build:       npm ci
@@ -172,7 +172,7 @@ One Render web service serves both the frontend and the API.
    Health path: /healthz
    ```
 
-8. Open the generated URL:
+9. Open the generated URL:
 
    ```text
    https://YOUR-SERVICE.onrender.com
