@@ -11,6 +11,10 @@ Three independent Arduino sketches:
 Both boards only make **outbound** HTTPS requests. Do not port-forward anything and do not give
 either board a public IP.
 
+> The relay accepts `X-Upload-Token` (these sketches) and `X-Api-Key` (original FieldEye
+> sketches), plus `Authorization: Bearer ...`, `?token=` and `?apiKey=`. For the complete
+> deployment walkthrough for this exact project, see [`../LIVE-SETUP.md`](../LIVE-SETUP.md).
+
 ---
 
 ## 1. Arduino IDE setup

@@ -13,6 +13,11 @@ The same page shows live readings from an **ESP32 38-pin sensor node** (temperat
 soil, light, air quality, motion, pressure, battery and RSSI). Everything runs from one Render
 web service, with **Metered TURN** available for restricted / carrier-grade NAT networks.
 
+> **Using the original FieldEye ESP sketches?** They are fully supported. The relay accepts both
+> `X-Api-Key` and `X-Upload-Token`, plus `Authorization: Bearer ...`, `?token=` and `?apiKey=`.
+> For the complete deployment + flashing walkthrough for this exact setup, see
+> [`LIVE-SETUP.md`](LIVE-SETUP.md).
+
 ---
 
 ## Table of contents
@@ -429,7 +434,8 @@ hosting on GitHub Pages:
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Dashboard stays on `OFF` | Camera cannot reach the relay, wrong URL or token | Check Serial Monitor, confirm the full `/api/upload-frame` URL and `UPLOAD_TOKEN` |
-| Upload returns `401` | Token mismatch | Set the same token in firmware and Render |
+| Upload returns `401` | Token mismatch | Set the same token in firmware and Render. Both `X-Upload-Token` and `X-Api-Key` are accepted |
+| Sensors show `OFF` after a while | Sensor node stopped posting | The dashboard marks data stale after 12 s; check the board, Wi-Fi and `/api/sensors/devices` |
 | Upload returns `400 Expected … bytes` | Wrong `w`/`h` or format | Use `?w=320&h=240&format=rgb565be` (or `le`) |
 | Colours look swapped | RGB565 byte order | Flip `USE_RGB565_BIG_ENDIAN` in the camera sketch |
 | Camera resets / brown-outs | Weak 5 V supply | Use a 5 V / 1 A supply and short, thick wires |

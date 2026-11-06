@@ -238,10 +238,12 @@ export class SensorStore {
 
   getStatus() {
     const latest = this.getLatest();
+    const connected = Boolean(latest?.connected);
     return {
-      connected: Boolean(latest?.connected),
-      source: latest?.source || 'none',
-      demo: latest?.source === 'demo',
+      connected,
+      // A stale packet must not keep the dashboard on "LIVE" forever.
+      source: connected ? latest.source : 'none',
+      demo: connected && latest?.source === 'demo',
       deviceId: latest?.deviceId || null,
       lastSeen: latest ? new Date(latest.ts).toISOString() : null,
       ageMs: latest?.ageMs ?? null,

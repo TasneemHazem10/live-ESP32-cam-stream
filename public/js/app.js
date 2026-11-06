@@ -14,6 +14,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll'];
 const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP' };
+const SENSOR_STALE_MS = 12_000;
 
 const SENSOR_DEFS = {
   temperature: { icon: 'thermometer', accent: '#fb923c', unit: '°C', decimals: 1, labelKey: 'sensor.temperature' },
@@ -26,6 +27,7 @@ const SENSOR_DEFS = {
   battery: { icon: 'bolt', accent: '#34d399', unit: '%', decimals: 0, labelKey: 'sensor.battery' },
   rssi: { icon: 'wifi', accent: '#94a3b8', unit: 'dBm', decimals: 0, labelKey: 'sensor.rssi' },
   co2: { icon: 'wind', accent: '#c4b5fd', unit: 'ppm', decimals: 0, labelKey: 'sensor.co2' },
+  waterLevel: { icon: 'droplet', accent: '#60a5fa', unit: '%', decimals: 0, labelKey: 'sensor.waterLevel' },
   waterTemperature: { icon: 'droplet', accent: '#38bdf8', unit: '°C', decimals: 1, labelKey: 'sensor.waterTemperature' },
   tds: { icon: 'droplet', accent: '#67e8f9', unit: 'ppm', decimals: 0, labelKey: 'sensor.tds' },
   turbidity: { icon: 'droplet', accent: '#7dd3fc', unit: 'NTU', decimals: 1, labelKey: 'sensor.turbidity' },
@@ -596,7 +598,11 @@ function renderSensorCards(keys) {
       updateSensorCard(key, latestSensor.readings[key]);
     }
     if (latestSensor) {
-      refs.status.textContent = latestSensor.demo ? t('sensor.statusDemo') : t('sensor.statusLive');
+      refs.status.textContent = latestSensor.demo
+        ? t('sensor.statusDemo')
+        : latestSensor.connected
+          ? t('sensor.statusLive')
+          : t('sensor.statusOffline');
     }
   }
 }
@@ -639,7 +645,26 @@ function updateSensorCard(key, value) {
     refs.range.textContent = '3m';
   }
 
-  refs.status.textContent = latestSensor?.demo ? t('sensor.statusDemo') : t('sensor.statusLive');
+  refs.status.textContent = latestSensor?.demo
+    ? t('sensor.statusDemo')
+    : latestSensor?.connected
+      ? t('sensor.statusLive')
+      : t('sensor.statusOffline');
+}
+
+function refreshSensorLiveness() {
+  if (!latestSensor || latestSensor.demo) return;
+  const connected = Date.now() - latestSensor.ts < SENSOR_STALE_MS;
+  if (latestSensor.connected === connected) return;
+
+  latestSensor.connected = connected;
+  latestSensor.source = connected ? 'live' : 'none';
+  updateSensorPill();
+  for (const [key, refs] of sensorCards) {
+    if (latestSensor.readings && key in latestSensor.readings) {
+      refs.status.textContent = connected ? t('sensor.statusLive') : t('sensor.statusOffline');
+    }
+  }
 }
 
 function pushSensorReading(key, value) {
@@ -670,12 +695,16 @@ function applySensorRecord(record, { seed = false } = {}) {
   if (!record || (!record.readings && !record.values)) return;
   const readings = record.readings || record.values || {};
   const ts = Number(record.ts) || Date.now();
+  const demo = Boolean(record.demo || record.source === 'demo');
   const normalized = {
     deviceId: record.deviceId || 'ESP32-SENSOR-01',
     readings,
     ts,
-    source: record.source || (record.demo ? 'demo' : 'live'),
-    demo: Boolean(record.demo || record.source === 'demo'),
+    source: record.source || (demo ? 'demo' : 'live'),
+    demo,
+    // The server also sends this; recompute locally so old history loaded on
+    // page refresh is never painted as a live device.
+    connected: demo ? true : record.connected !== false && Date.now() - ts < SENSOR_STALE_MS,
   };
 
   latestSensor = normalized;
@@ -742,10 +771,14 @@ function updateSensorPill() {
       key = 'demo';
       text = t('sensors.demo');
       cls = 'is-demo';
-    } else {
+    } else if (latestSensor.connected) {
       key = 'live';
       text = t('sensors.connected');
       cls = 'is-live';
+    } else {
+      key = 'offline';
+      text = t('sensors.offline');
+      cls = 'is-offline';
     }
   }
 
@@ -1180,6 +1213,7 @@ function setupClocks() {
       });
     }
     updateSensorUpdated();
+    refreshSensorLiveness();
   };
   update();
   setInterval(update, 1000);

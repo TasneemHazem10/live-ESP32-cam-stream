@@ -53,7 +53,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, X-Upload-Token, X-Frame-Width, X-Frame-Height, X-Frame-Format',
+    'Content-Type, X-Upload-Token, X-Api-Key, X-Device-Id, X-Frame-Width, X-Frame-Height, X-Frame-Format, X-Rgb565-Order',
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -80,9 +80,24 @@ const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req,
 
 function requireToken(req, res, next) {
   if (!hasUploadAuth()) return next();
-  const token = req.get('x-upload-token') || req.query.token;
+  const authorization = req.get('authorization') || '';
+  const bearer = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : '';
+  // Accept both header names so the original FieldEye sketches (X-Api-Key) and
+  // the MIRSAD sketches (X-Upload-Token) work without reflashing.
+  const token =
+    req.get('x-upload-token') ||
+    req.get('x-api-key') ||
+    bearer ||
+    req.query.token ||
+    req.query.apiKey;
   if (token && token === config.uploadToken) return next();
-  return res.status(401).json({ ok: false, error: 'invalid_token', message: 'Missing or invalid X-Upload-Token' });
+  return res.status(401).json({
+    ok: false,
+    error: 'invalid_token',
+    message: 'Missing or invalid X-Upload-Token / X-Api-Key',
+  });
 }
 
 function pickDimension(queryValue, headerValue, fallback) {
@@ -93,7 +108,7 @@ function pickDimension(queryValue, headerValue, fallback) {
 
 function frameOptions(req) {
   const format = parseFormat(
-    req.query.format || req.get('x-frame-format'),
+    req.query.format || req.get('x-frame-format') || req.get('x-rgb565-order'),
     config.defaultFormat,
   );
   const flip = parseFlip(req.query.flip);
@@ -203,6 +218,15 @@ function mjpegHandler(req, res) {
   const sub = frameHub.subscribe();
   let closed = false;
 
+  const writeFrame = (frame) => {
+    if (closed || !frame) return;
+    res.write(
+      `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.jpeg.length}\r\nX-Seq: ${frame.seq}\r\nX-Time: ${frame.ts}\r\n\r\n`,
+    );
+    res.write(frame.jpeg);
+    res.write('\r\n');
+  };
+
   const stop = () => {
     if (closed) return;
     closed = true;
@@ -213,17 +237,17 @@ function mjpegHandler(req, res) {
   res.on('close', stop);
   res.on('error', stop);
 
+  // Send the newest frame immediately so an <img> or player paints at once
+  // instead of waiting up to a full frame interval (or forever when the
+  // camera is paused).
+  if (frameHub.latest) writeFrame(frameHub.latest);
+
   (async () => {
     while (!closed) {
       const frame = await sub.next(10_000);
       if (closed) break;
       if (!frame) continue;
-
-      res.write(
-        `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.jpeg.length}\r\nX-Seq: ${frame.seq}\r\nX-Time: ${frame.ts}\r\n\r\n`,
-      );
-      res.write(frame.jpeg);
-      res.write('\r\n');
+      writeFrame(frame);
     }
   })().catch(stop);
 }
@@ -250,6 +274,24 @@ app.post('/api/sensors', requireToken, (req, res) => {
   } catch (error) {
     return res.status(400).json({ ok: false, error: 'invalid_sensors', message: error.message });
   }
+});
+
+// Compatibility shape used by the original FieldEye dashboard.
+app.get('/api/sensors', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const latest = sensorStore.getLatest();
+  const history = sensorStore.getHistory(120);
+  if (!latest) {
+    return res.json({ ok: true, data: {}, values: {}, updatedAt: 0, history });
+  }
+  return res.json({
+    ok: true,
+    ...latest,
+    data: latest.readings,
+    values: latest.readings,
+    updatedAt: latest.ts,
+    history,
+  });
 });
 
 app.get('/api/sensors/latest', (req, res) => {
@@ -296,20 +338,31 @@ app.get(
   }),
 );
 
-app.post(
-  '/api/rtc/offer',
+const rtcOfferHandler = asyncRoute(async (req, res) => {
+  try {
+    const answer = await createWebRtcPeer(req.body, { ip: req.ip });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ok: true, ...answer });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      ok: false,
+      error: 'webrtc_offer_failed',
+      message: error.message,
+    });
+  }
+});
+
+app.post('/api/rtc/offer', rtcOfferHandler);
+// Alias used by the original FieldEye dashboard.
+app.post('/api/webrtc/offer', rtcOfferHandler);
+
+// FieldEye-compatible ICE alias.
+app.get(
+  '/api/ice',
   asyncRoute(async (req, res) => {
-    try {
-      const answer = await createWebRtcPeer(req.body, { ip: req.ip });
-      res.setHeader('Cache-Control', 'no-store');
-      return res.json({ ok: true, ...answer });
-    } catch (error) {
-      return res.status(error.statusCode || 500).json({
-        ok: false,
-        error: 'webrtc_offer_failed',
-        message: error.message,
-      });
-    }
+    const ice = await getIceConfig();
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ iceServers: ice.iceServers, source: ice.source, turn: ice.turn });
   }),
 );
 
@@ -548,7 +601,7 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
 
-  if (pathname === '/ws/frames') {
+  if (pathname === '/ws/frames' || pathname === '/ws') {
     frameWss.handleUpgrade(req, socket, head, (ws) => frameWss.emit('connection', ws, req));
     return;
   }
