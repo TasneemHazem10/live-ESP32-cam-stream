@@ -2,8 +2,7 @@
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/TasneemHazem10/live-ESP32-cam-stream)
 
 **Live ESP32-CAM vision dashboard with browser effects, WebRTC/TURN transport and ESP32 sensor telemetry.**
-
-MIRSAD accepts raw **RGB565** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker), converts
+it accepts raw **RGB565** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker), converts
 them to JPEG on the server, and fans them out to every browser over **WebSocket**, **MJPEG**,
 **HTTP polling** or a **WebRTC data channel**. The camera only makes outbound HTTPS requests:
 it needs **no public IP, no port forwarding and no NAT traversal**.
