@@ -49,7 +49,7 @@ web service, with **Metered TURN** available for restricted / carrier-grade NAT 
 | Sensors | 9 live demo cards + history chart; real ESP32 packets replace the demo automatically |
 | UI | Arabic-first RTL with one-click English, dark aurora glass design, scroll reveals, counters, responsive mobile menu |
 | Operations | `/healthz`, `/api/status`, structured errors, upload token, CORS allow-list, request logging, Docker file |
-| Demo mode | Synthetic camera + sensor signal starts automatically when no hardware is connected |
+| Demo mode | Optional synthetic camera + sensor signal for UI development (`DEMO_FALLBACK=true`); **off by default** and permanently stops after the first real frame |
 
 ---
 
@@ -92,8 +92,10 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3000**. The page starts in demo mode with a synthetic camera feed and
-sensor readings, so every control works before the hardware is connected.
+Open **http://localhost:3000**. The page starts in **live-only mode**: it shows a
+"waiting for camera" panel until the ESP32-CAM sends its first frame. There is no synthetic
+video by default. To preview the UI without hardware, set `DEMO_FALLBACK=true` in `.env` and
+restart the server.
 
 Useful local commands:
 
@@ -106,8 +108,14 @@ npm run test:webrtc  # real offer/answer + data-channel frame check
 npm run test:ui      # headless Chrome UI test (needs system Chrome)
 ```
 
-To use a real camera, flash [`firmware/esp32cam-streamer`](firmware/esp32cam-streamer/esp32cam-streamer.ino)
-and set its `SERVER_URL` to `https://YOUR-SERVICE.onrender.com/api/upload-frame`.
+To use a real camera, flash one of the ESP32-CAM sketches and point `SERVER_URL` at
+`https://YOUR-SERVICE.onrender.com/api/upload-frame`:
+
+- [`firmware/esp32cam-wifimanager`](firmware/esp32cam-wifimanager/esp32cam-wifimanager.ino) —
+  recommended; first boot opens the `ESP32-CAM-Config` Wi-Fi portal, no Wi-Fi credentials in code.
+- [`firmware/esp32cam-streamer`](firmware/esp32cam-streamer/esp32cam-streamer.ino) — hard-coded
+  Wi-Fi SSID/password.
+
 See the [firmware guide](firmware/README.md) for wiring, flashing and calibration.
 
 ---
@@ -238,7 +246,7 @@ service's **Environment** tab. Secrets are never required by the browser.
 | `PORT` | `3000` | HTTP port |
 | `UPLOAD_TOKEN` | empty | Shared secret for camera/sensor uploads |
 | `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins |
-| `DEMO_FALLBACK` | `true` | Generate synthetic frames/sensors when hardware is absent |
+| `DEMO_FALLBACK` | `false` | Optional synthetic frames/sensors for UI testing; disable for live-only |
 | `DEMO_FPS` | `8` | Demo camera frame rate |
 | `JPEG_QUALITY` | `80` | JPEG encoder quality |
 | `FRAME_WIDTH` / `FRAME_HEIGHT` | `320` / `240` | Defaults when the device omits dimensions |
@@ -377,8 +385,8 @@ const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/sensors";      /
 const char *UPLOAD_TOKEN = "...";   // same value as Render, or empty
 ```
 
-After the first camera frame arrives, the dashboard source badge changes from `DEMO` to
-`LIVE` and the demo toast disappears.
+After the first camera frame arrives, the dashboard source badge changes from `OFF` to
+`LIVE` and the waiting panel disappears.
 
 ### Optional: GitHub Pages frontend
 
@@ -415,12 +423,12 @@ hosting on GitHub Pages:
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Dashboard stays on `DEMO` | Camera cannot reach the relay, wrong URL or token | Check Serial Monitor, confirm the full `/api/upload-frame` URL and `UPLOAD_TOKEN` |
+| Dashboard stays on `OFF` | Camera cannot reach the relay, wrong URL or token | Check Serial Monitor, confirm the full `/api/upload-frame` URL and `UPLOAD_TOKEN` |
 | Upload returns `401` | Token mismatch | Set the same token in firmware and Render |
 | Upload returns `400 Expected … bytes` | Wrong `w`/`h` or format | Use `?w=320&h=240&format=rgb565be` (or `le`) |
 | Colours look swapped | RGB565 byte order | Flip `USE_RGB565_BIG_ENDIAN` in the camera sketch |
 | Camera resets / brown-outs | Weak 5 V supply | Use a 5 V / 1 A supply and short, thick wires |
-| `GET /api/frame.jpg` 404 | No frame uploaded yet | Start the camera or leave `DEMO_FALLBACK=true` |
+| `GET /api/frame.jpg` 404 | No frame uploaded yet | Start the camera, or set `DEMO_FALLBACK=true` only for UI testing |
 | WebRTC connects but no frames | Server demo/camera stopped | Check `/api/status`; confirm `frameReady` and network |
 | TURN pill says `STUN` | Metered not configured or credentials failed | Set `METERED_DOMAIN` + `METERED_API_KEY`, check server logs |
 | Sensors show `--` | No packet yet | Confirm `/api/sensors` URL and JSON body; check `/api/sensors/devices` |
@@ -434,7 +442,7 @@ hosting on GitHub Pages:
 ```text
 server/                 Express relay
   config.js             Environment parsing
-  frameHub.js           RGB565 → JPEG, demo signal, fan-out
+  frameHub.js           RGB565 → JPEG, live frame hub, fan-out
   rgb565.js             Byte-order conversion and validation
   sensors.js            Sensor normalisation, history, demo data
   webrtc.js             werift peers + Metered credentials
@@ -448,7 +456,8 @@ public/                 Static dashboard (served by the relay)
   js/charts.js          Sparklines and telemetry chart
   js/i18n.js            Arabic/English dictionary
 firmware/
-  esp32cam-streamer/    ESP32-CAM RGB565 uploader
+  esp32cam-streamer/    ESP32-CAM RGB565 uploader (hard-coded Wi-Fi)
+  esp32cam-wifimanager/ ESP32-CAM RGB565 uploader (captive-portal Wi-Fi setup)
   esp32-sensor-node/    ESP32 38-pin telemetry node
 tools/                  Simulators and test suites
 docs/                   API reference + English/Arabic deployment guides

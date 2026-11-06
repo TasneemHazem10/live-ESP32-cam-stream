@@ -33,7 +33,7 @@ export const config = {
   allowedOrigins: process.env.ALLOWED_ORIGINS || '*',
   trustProxy: bool(process.env.TRUST_PROXY, true),
 
-  demoFallback: bool(process.env.DEMO_FALLBACK, true),
+  demoFallback: bool(process.env.DEMO_FALLBACK, false),
   demoFps: Math.min(15, Math.max(2, int(process.env.DEMO_FPS, 8))),
   jpegQuality: Math.min(95, Math.max(40, int(process.env.JPEG_QUALITY, 80))),
   defaultWidth: int(process.env.FRAME_WIDTH, 320),

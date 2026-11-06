@@ -1,10 +1,11 @@
 # MIRSAD firmware guide
 
-Two independent Arduino sketches:
+Three independent Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 RGB565 and POST frames |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 RGB565 and POST frames; Wi-Fi configured through the `ESP32-CAM-Config` captive portal |
+| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 RGB565 and POST frames; Wi-Fi SSID/password hard-coded |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
 Both boards only make **outbound** HTTPS requests. Do not port-forward anything and do not give
@@ -25,9 +26,10 @@ either board a public IP.
    - **DHT sensor library** by Adafruit
    - **Adafruit Unified Sensor**
    - **Adafruit BMP280** (only if you enable pressure)
-5. Select the correct port under **Tools → Port**.
+5. Install **WiFiManager** by tzapu if you use the `esp32cam-wifimanager` sketch.
+6. Select the correct port under **Tools → Port**.
 
-The camera sketch only needs the ESP32 board package; `esp_camera.h` is bundled.
+The camera sketches only need the ESP32 board package; `esp_camera.h` is bundled.
 
 ---
 
@@ -68,6 +70,32 @@ facing the board and check the 5 V supply.
 
 ### Camera settings to edit
 
+**Recommended: `esp32cam-wifimanager` (captive portal)**
+
+Only the relay settings live in code; Wi-Fi credentials are stored on the board after the first
+setup.
+
+```cpp
+const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/upload-frame";
+const char *UPLOAD_TOKEN = "";          // same as Render, or empty
+const char *DEVICE_ID = "ESP32-CAM-01";
+const bool USE_RGB565_BIG_ENDIAN = true;
+const int TARGET_FPS = 4;
+```
+
+First boot:
+
+1. Flash the sketch, then press **RST**.
+2. On your phone or laptop, join the Wi-Fi network **`ESP32-CAM-Config`**.
+3. Choose your home Wi-Fi and enter its password.
+4. The portal closes and the board starts posting frames. Credentials survive reboots.
+5. To change networks later, hold the board in the portal by erasing its Wi-Fi settings
+   (**Tools → Erase Flash → All Flash Contents**) and rebooting.
+
+The portal uses a **180-second timeout**; if it expires, the board restarts and tries again.
+
+**Alternative: `esp32cam-streamer` (hard-coded Wi-Fi)**
+
 ```cpp
 const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
@@ -78,7 +106,7 @@ const bool USE_RGB565_BIG_ENDIAN = true;
 const int TARGET_FPS = 4;
 ```
 
-The sketch appends the required query string automatically:
+Both sketches append the required query string automatically:
 
 ```text
 ?w=320&h=240&format=rgb565be&device=ESP32-CAM-01
@@ -201,8 +229,9 @@ Serial output after a successful start:
 ## 4. Verify end to end
 
 1. Open the Render URL (or `http://localhost:3000`).
-2. The camera badge changes from `DEMO` to `LIVE` after the first frame.
-3. Sensor values replace the simulated values within two seconds.
+2. The camera badge changes from `OFF` to `LIVE` after the first frame. In live-only mode the
+   dashboard shows a waiting panel until the ESP32-CAM connects.
+3. Sensor values replace `--` within two seconds of the first packet.
 4. Check the server:
 
 ```bash
@@ -212,6 +241,9 @@ curl https://YOUR-SERVICE.onrender.com/api/sensors/devices
 
 5. In the dashboard open **WebRTC** mode to confirm the data channel works. If Metered is
    configured, the TURN pill reads `TURN`; otherwise `STUN`.
+
+If the badge stays on `OFF`, the board is not reaching the relay. Open the Serial Monitor at
+115200 and confirm the `[relay]` URL and the `[upload] ... ok` lines.
 
 ---
 
@@ -229,6 +261,7 @@ curl https://YOUR-SERVICE.onrender.com/api/sensors/devices
 | Random resets | Weak 5 V supply; shorten wires, add a 470–1000 µF capacitor near 5 V/GND |
 | Image is dark | Increase `set_brightness` slightly, or add light; the OV2640 needs decent illumination |
 | Very low FPS | Reduce `TARGET_FPS`, move closer to the router, use the external antenna if present |
+| `ESP32-CAM-Config` portal never appears | Board already has saved Wi-Fi credentials | Erase flash (**Tools → Erase Flash → All Flash Contents**) and reboot |
 
 ### Sensor node
 

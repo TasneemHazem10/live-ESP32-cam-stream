@@ -44,9 +44,10 @@ const state = {
   tour: false,
   tourTimer: null,
   frameReady: false,
-  source: 'demo',
+  source: 'none',
   streamConnected: false,
   lastFrameMeta: { width: 320, height: 240 },
+  lastFrameAt: 0,
   lang: 'ar',
 };
 
@@ -346,6 +347,7 @@ function startTour() {
 const stream = new LiveStream({
   onFrame(bitmap, meta) {
     state.streamConnected = true;
+    state.lastFrameAt = Date.now();
     applySource(meta.source || stream.lastSource || state.source);
     renderFrame(bitmap, meta);
     hideWait();
@@ -440,9 +442,12 @@ function updateCameraPill() {
     if (state.source === 'live') {
       text = t('status.live');
       cls = 'is-live';
-    } else {
+    } else if (state.source === 'demo') {
       text = t('status.demo');
       cls = 'is-demo';
+    } else {
+      text = t('status.waiting');
+      cls = 'is-offline';
     }
   } else if (state.phase === 'connecting') {
     text = t('status.connecting');
@@ -1244,13 +1249,25 @@ setupReveal();
 setupTilt();
 setupClocks();
 setupEndpoint();
-applySource('demo');
+applySource('none');
 updateCameraPill();
 
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
 startMode('ws', { announce: false });
+
+// Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
+// waiting panel instead of leaving a frozen frame on screen.
+setInterval(() => {
+  if (!state.streamConnected || !state.lastFrameAt) return;
+  if (Date.now() - state.lastFrameAt > 6000) {
+    state.streamConnected = false;
+    applySource('none');
+    showWait();
+    updateCameraPill();
+  }
+}, 1000);
 
 // Pause sensor reconnects while the tab is hidden, resume on focus.
 document.addEventListener('visibilitychange', () => {

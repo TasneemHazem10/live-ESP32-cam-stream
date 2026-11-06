@@ -145,7 +145,7 @@ function startSending(peer) {
   }, 5000);
   peer.statusTimer.unref?.();
 
-  if (frameHub.latest) sendFrame(peer, frameHub.latest);
+  if (frameHub.isLive()) sendFrame(peer, frameHub.latest);
 }
 
 export async function createWebRtcPeer(offer, meta = {}) {

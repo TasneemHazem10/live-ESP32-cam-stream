@@ -79,8 +79,8 @@ Returns the newest frame. Headers: `X-Frame-Seq`, `X-Frame-Time`, `X-Frame-Sourc
 curl -o latest.jpg http://localhost:3000/api/frame.jpg
 ```
 
-Returns `404 {"ok":false,"error":"no_frame"}` before any frame exists and when the demo signal
-is disabled.
+Returns `404 {"ok":false,"error":"no_frame"}` before any frame exists. In live-only mode this
+is the normal response until the ESP32-CAM uploads its first frame.
 
 ### `GET /api/latest-frame`
 
@@ -370,7 +370,7 @@ decodes the JPEG with `createImageBitmap`. Text messages are JSON status packets
     "iceSource": "metered"
   },
   "config": {
-    "demoFallback": true,
+    "demoFallback": false,
     "uploadAuth": true,
     "jpegQuality": 80,
     "frameSize": "320x240",
@@ -402,6 +402,7 @@ Used by Render and Docker health checks.
 ## 6. Firmware downloads
 
 ```text
+GET /firmware/esp32cam-wifimanager/esp32cam-wifimanager.ino
 GET /firmware/esp32cam-streamer/esp32cam-streamer.ino
 GET /firmware/esp32-sensor-node/esp32-sensor-node.ino
 ```

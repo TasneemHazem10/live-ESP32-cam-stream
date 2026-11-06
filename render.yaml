@@ -13,8 +13,9 @@ services:
         value: "22"
       - key: NODE_ENV
         value: production
+      # Live-only: set to "true" only if you want the synthetic demo feed.
       - key: DEMO_FALLBACK
-        value: "true"
+        value: "false"
       - key: DEMO_FPS
         value: "8"
       - key: JPEG_QUALITY

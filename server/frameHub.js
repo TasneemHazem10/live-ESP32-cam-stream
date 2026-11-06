@@ -20,6 +20,7 @@ export class FrameHub {
     this.frameTimes = [];
     this.byteLog = [];
     this.lastRealAt = 0;
+    this.sawRealFrame = false;
     this.listeners = new Set();
     this.subscribers = new Set();
     this.rgba = null;
@@ -121,6 +122,7 @@ export class FrameHub {
     if (frame.source === 'live') {
       this.realFrames += 1;
       this.lastRealAt = now;
+      this.sawRealFrame = true;
     }
 
     this.frameTimes.push(now);
@@ -237,6 +239,8 @@ export class FrameHub {
 
   renderDemoIfNeeded() {
     if (!config.demoFallback) return;
+    // Once a real camera has been seen, never fall back to synthetic frames.
+    if (this.sawRealFrame) return;
     if (Date.now() - this.lastRealAt < 4000) return;
 
     const width = this.demoWidth;

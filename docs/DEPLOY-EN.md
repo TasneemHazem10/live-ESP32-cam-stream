@@ -66,8 +66,9 @@ Open:
 http://localhost:3000
 ```
 
-The dashboard starts in **DEMO mode** with a synthetic camera and changing sensor readings, so
-every control works before any hardware is connected.
+The dashboard starts in **live-only mode**: it shows a waiting panel until the ESP32-CAM sends
+its first frame. There is no synthetic video by default. To preview the UI without hardware,
+set `DEMO_FALLBACK=true` in `.env` and restart the server.
 
 Try:
 
@@ -223,7 +224,7 @@ In Render: open the service → **Environment** → add or edit variables → sa
 | `NODE_ENV` | `production` | Production mode |
 | `UPLOAD_TOKEN` | long random string | Protects camera/sensor uploads |
 | `ALLOWED_ORIGINS` | `*` or your domain | Allowed browser origins |
-| `DEMO_FALLBACK` | `true` | Synthetic frames/readings when no hardware is present |
+| `DEMO_FALLBACK` | `false` | Optional synthetic frames/readings for UI testing; keep false for live-only |
 | `DEMO_FPS` | `8` | Demo camera frame rate |
 | `JPEG_QUALITY` | `80` | JPEG quality |
 | `FRAME_WIDTH` / `FRAME_HEIGHT` | `320` / `240` | Default frame dimensions |
@@ -315,13 +316,20 @@ from `STUN` to `TURN`.
 
 ### 7.3 Edit the sketch
 
-Open:
+Two camera sketches exist. The **recommended** one stores Wi-Fi credentials through the
+`ESP32-CAM-Config` captive portal, so no Wi-Fi password is written in code:
 
 ```text
-firmware/esp32cam-streamer/esp32cam-streamer.ino
+firmware/esp32cam-wifimanager/esp32cam-wifimanager.ino
 ```
 
-Edit:
+It still needs the relay settings below (`SERVER_URL`, `UPLOAD_TOKEN`, `DEVICE_ID`,
+`USE_RGB565_BIG_ENDIAN`, `TARGET_FPS`). After flashing, join **`ESP32-CAM-Config`** from your
+phone or laptop and choose your home network. To change networks later, erase the flash and
+reboot.
+
+The alternative sketch with hard-coded Wi-Fi credentials is
+`firmware/esp32cam-streamer/esp32cam-streamer.ino`:
 
 ```cpp
 const char *WIFI_SSID     = "YOUR_WIFI_NAME";
@@ -473,7 +481,7 @@ Expected serial output:
    https://YOUR-SERVICE.onrender.com
    ```
 
-2. The camera badge changes from `DEMO` to `LIVE` after the first frame arrives.
+2. The camera badge changes from `OFF` to `LIVE` after the first frame arrives.
 3. Real sensor values replace the simulated ones within two seconds.
 4. Try each transport: **WebSocket**, **WebRTC**, **MJPEG**, **HTTP**.
 5. With Metered configured the badge reads `TURN`; otherwise `STUN`.
@@ -524,13 +532,13 @@ Render redeploys automatically because `render.yaml` sets `autoDeploy: true`. Yo
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Dashboard stays on `DEMO` | Camera cannot reach the relay | Check `SERVER_URL`, Serial Monitor, and Wi-Fi |
+| Dashboard stays on `OFF` / waiting | Camera cannot reach the relay | Check `SERVER_URL`, Serial Monitor, and Wi-Fi |
 | Upload returns `401` | Token mismatch | Use the same `UPLOAD_TOKEN` in firmware and Render |
 | Upload returns `400 Expected … bytes` | Wrong dimensions or format | Keep 320×240 and `rgb565be` or `rgb565le` |
 | Colours swapped | RGB565 byte order | Flip `USE_RGB565_BIG_ENDIAN` |
 | ESP32-CAM reboots randomly | Weak power supply | 5 V / 1 A, short thick wires, 470–1000 µF capacitor |
 | `[camera] init failed: 0x105` | Camera not detected | Reseat the ribbon cable, check PSRAM and power |
-| `GET /api/frame.jpg` returns 404 | No frame uploaded yet | Start the camera or keep `DEMO_FALLBACK=true` |
+| `GET /api/frame.jpg` returns 404 | No frame uploaded yet | Start the camera, or set `DEMO_FALLBACK=true` only for UI testing |
 | WebRTC connects but no frames | No live frames or blocked network | Check `/api/status` and Metered configuration |
 | TURN badge stays `STUN` | Metered not configured or credentials failed | Set `METERED_DOMAIN` + `METERED_API_KEY`, redeploy |
 | Sensors show `--` | No packet received | Check the `/api/sensors` URL and JSON body |

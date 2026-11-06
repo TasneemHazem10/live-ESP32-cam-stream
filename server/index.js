@@ -481,7 +481,7 @@ frameWss.on('connection', (ws) => {
       webrtc: { transport: 'datachannel' },
     }),
   );
-  if (frameHub.latest) sendFrame(frameHub.latest);
+  if (frameHub.isLive()) sendFrame(frameHub.latest);
 
   const off = frameHub.onFrame(sendFrame);
   ws.on('close', () => {
