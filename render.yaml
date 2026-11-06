@@ -40,11 +40,5 @@ services:
       # UPLOAD_TOKEN so only your camera can post frames.
       - key: UPLOAD_TOKEN
         generateValue: true
-      # Optional TURN (Metered). Leave unset for STUN-only WebRTC.
-      # Add these later in Dashboard → Environment if you need TURN.
-      - key: METERED_DOMAIN
-        sync: false
-      - key: METERED_API_KEY
-        sync: false
-      - key: METERED_REGION
-        sync: false
+      # TURN (Metered) is optional. Add METERED_DOMAIN, METERED_API_KEY and
+      # METERED_REGION later in Dashboard → Environment if you need TURN.

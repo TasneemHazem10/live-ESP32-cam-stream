@@ -162,8 +162,9 @@ One Render web service serves both the frontend and the API.
 6. Render **auto-generates `UPLOAD_TOKEN`** for you. After the service is created, open
    **Dashboard → your service → Environment** and copy the token — you will paste it into the
    ESP32 sketch.
-7. `METERED_DOMAIN`, `METERED_API_KEY`, `METERED_REGION` are optional. Leave them blank for
-   now (STUN-only WebRTC) and add them later if you need TURN.
+7. TURN is optional. The Blueprint uses public STUN by default. To support very restrictive
+   networks later, add `METERED_DOMAIN`, `METERED_API_KEY` and `METERED_REGION` under
+   **Dashboard → your service → Environment** and redeploy.
 8. Wait for the build and deploy. Render uses:
 
    ```text

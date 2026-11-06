@@ -142,8 +142,9 @@ git status
 5. راجع الإعدادات ثم اضغط **Apply**.
 6. يولّد Render قيمة **`UPLOAD_TOKEN`** تلقائيًا. بعد إنشاء الخدمة افتح
    **Dashboard → الخدمة → Environment** وانسخ القيمة — ستضعها في كود ESP32.
-7. المتغيرات `METERED_DOMAIN` و`METERED_API_KEY` و`METERED_REGION` اختيارية. اتركها فارغة
-   الآن (WebRTC عبر STUN فقط) وأضفها لاحقًا إذا احتجت TURN.
+7. خدمة TURN اختيارية. يستخدم الـ Blueprint خوادم STUN العامة افتراضيًا. لدعم الشبكات
+   المقيّدة جدًا لاحقًا، أضف `METERED_DOMAIN` و`METERED_API_KEY` ومنطقة `METERED_REGION` من
+   **Dashboard → الخدمة → Environment** ثم أعد النشر.
 8. انتظر انتهاء **Build** ثم **Deploy**. الأمران المستخدمان:
    - Build: `npm ci`
    - Start: `npm start`
