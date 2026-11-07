@@ -1,5 +1,9 @@
 # MIRSAD — Complete Deployment & Hardware Guide
 
+> **Update:** Render deployment has been replaced. The relay now runs on the laptop and LiveKit
+> Cloud carries remote video. Use [`../LIVE-SETUP.md`](../LIVE-SETUP.md) for the current
+> procedure. The Render steps below are kept only as legacy reference.
+
 This guide walks through the entire project, end to end:
 
 1. Run it locally.

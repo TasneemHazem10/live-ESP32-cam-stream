@@ -3,9 +3,10 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
-import { ROOT_DIR, config, PUBLIC_DIR, hasUploadAuth } from './config.js';
+import { ROOT_DIR, config, PUBLIC_DIR, hasLiveKit, hasUploadAuth } from './config.js';
 import { frameHub } from './frameHub.js';
 import { sensorStore } from './sensors.js';
+import { broadcastSensor, createLiveKitToken, liveKitStatus } from './livekit.js';
 import { isJpeg, parseFlip, parseFormat } from './rgb565.js';
 import {
   closeAllWebRtcPeers,
@@ -58,7 +59,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
@@ -317,6 +318,43 @@ app.get('/api/sensors/devices', (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* LiveKit Cloud                                                       */
+/* ------------------------------------------------------------------ */
+
+app.get('/api/livekit/config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({ ok: true, ...liveKitStatus(), transport: 'webrtc' });
+});
+
+const liveKitTokenHandler = asyncRoute(async (req, res) => {
+  const role = String(req.query.role || req.body?.role || 'viewer').toLowerCase() === 'publisher'
+    ? 'publisher'
+    : 'viewer';
+  const identity = req.query.identity || req.body?.identity;
+  const name = req.query.name || req.body?.name;
+  try {
+    const result = await createLiveKitToken({ identity, role, name });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      ok: false,
+      error: error.code || 'livekit_token_failed',
+      message: error.message,
+    });
+  }
+});
+
+app.get('/api/livekit/token', liveKitTokenHandler);
+app.post('/api/livekit/token', liveKitTokenHandler);
+
+// Serve the browser SDK locally so the dashboard works on a LAN with no CDN.
+app.get('/vendor/livekit-client.umd.js', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.join(ROOT_DIR, 'node_modules', 'livekit-client', 'dist', 'livekit-client.umd.js'));
+});
+
+/* ------------------------------------------------------------------ */
 /* WebRTC signalling                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -398,6 +436,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
       turn: ice.turn,
       iceSource: ice.source,
     },
+    livekit: liveKitStatus(),
     config: {
       demoFallback: config.demoFallback,
       uploadAuth: hasUploadAuth(),
@@ -414,6 +453,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
       sensors: '/api/sensors',
       sensorsWs: '/ws/sensors',
       webrtc: '/api/rtc/offer',
+      livekit: '/api/livekit/token',
     },
   });
 }));
@@ -655,6 +695,11 @@ for (const ws of [frameWss, sensorWss]) {
 
 frameHub.start();
 sensorStore.start();
+// Mirror every sensor packet into the LiveKit room so viewers who only have
+// the LiveKit URL (no access to this laptop) still see live telemetry.
+sensorStore.onUpdate((record) => {
+  broadcastSensor(record).catch(() => {});
+});
 
 server.listen(config.port, config.host, () => {
   const shownHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
@@ -665,6 +710,8 @@ server.listen(config.port, config.host, () => {
   console.log(`  ➜  demo signal     : ${config.demoFallback ? 'ON' : 'OFF'}`);
   console.log(`  ➜  upload auth     : ${hasUploadAuth() ? 'ON' : 'OFF'}`);
   console.log(`  ➜  TURN            : ${config.metered.domain && config.metered.apiKey ? 'Metered configured' : 'STUN only'}`);
+  console.log(`  ➜  LiveKit         : ${hasLiveKit() ? `${config.livekit.url} · room "${config.livekit.room}"` : 'not configured'}`);
+  console.log(`  ➜  sensors         : ${config.demoFallback ? 'live simulator until ESP32 connects' : 'waiting for ESP32'}`);
   console.log('');
 });
 

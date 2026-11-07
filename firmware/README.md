@@ -80,8 +80,8 @@ Only the relay settings live in code; Wi-Fi credentials are stored on the board 
 setup.
 
 ```cpp
-const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/upload-frame";
-const char *UPLOAD_TOKEN = "";          // same as Render, or empty
+const char *SERVER_URL = "http://192.168.1.50:3000/api/upload-frame";
+const char *UPLOAD_TOKEN = "";          // same as .env, or empty
 const char *DEVICE_ID = "ESP32-CAM-01";
 const bool USE_RGB565_BIG_ENDIAN = true;
 const int TARGET_FPS = 4;
@@ -103,8 +103,8 @@ The portal uses a **180-second timeout**; if it expires, the board restarts and 
 ```cpp
 const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/upload-frame";
-const char *UPLOAD_TOKEN = "";          // same as Render, or empty
+const char *SERVER_URL = "http://192.168.1.50:3000/api/upload-frame";
+const char *UPLOAD_TOKEN = "";          // same as .env, or empty
 const char *DEVICE_ID = "ESP32-CAM-01";
 const bool USE_RGB565_BIG_ENDIAN = true;
 const int TARGET_FPS = 4;

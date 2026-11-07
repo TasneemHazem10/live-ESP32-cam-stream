@@ -1,6 +1,7 @@
 # MIRSAD API reference
 
-Base URL: `http://localhost:3000` or `https://YOUR-SERVICE.onrender.com`.
+Base URL: `http://localhost:3000` (the relay runs on your laptop), or the HTTPS tunnel URL if you
+expose it to other devices.
 
 All control endpoints return JSON. Camera uploads use a binary body; streams use JPEG,
 multipart or WebSocket. Unknown `/api/*` routes return a structured 404.
@@ -325,7 +326,49 @@ decodes the JPEG with `createImageBitmap`. Text messages are JSON status packets
 
 ---
 
-## 5. Status and health
+## 5. LiveKit Cloud
+
+LiveKit replaces Render for remote video. The relay only signs join tokens; media flows directly
+between participants and LiveKit Cloud.
+
+### `GET /api/livekit/config`
+
+```json
+{ "ok": true, "enabled": true, "url": "wss://…livekit.cloud", "room": "live", "transport": "webrtc" }
+```
+
+`enabled` is `false` when `LIVEKIT_URL`, `LIVEKIT_API_KEY` or a valid `LIVEKIT_API_SECRET` is
+missing.
+
+### `GET|POST /api/livekit/token`
+
+Query/body parameters:
+
+| Name | Values | Purpose |
+| --- | --- | --- |
+| `role` | `viewer` (default), `publisher` | Publishers can send camera/data; viewers can only subscribe |
+| `identity` | optional string | Stable participant id; a random one is generated otherwise |
+| `name` | optional string | Display name |
+
+```json
+{
+  "ok": true,
+  "token": "eyJhbGciOi…",
+  "url": "wss://…livekit.cloud",
+  "room": "live",
+  "identity": "viewer-e0e05f20",
+  "role": "viewer",
+  "ttl": 21600
+}
+```
+
+Returns `503 livekit_not_configured` until the LiveKit secret is set. Sensor packets are mirrored
+into the room data channel with topic `sensors` as
+`{"type":"sensor","deviceId":…,"readings":{…},"ts":…,"source":…,"demo":…}`.
+
+---
+
+## 6. Status and health
 
 ### `GET /api/status`
 
@@ -369,6 +412,11 @@ decodes the JPEG with `createImageBitmap`. Text messages are JSON status packets
     "turn": true,
     "iceSource": "metered"
   },
+  "livekit": {
+    "enabled": true,
+    "url": "wss://…livekit.cloud",
+    "room": "live"
+  },
   "config": {
     "demoFallback": false,
     "uploadAuth": true,
@@ -384,7 +432,8 @@ decodes the JPEG with `createImageBitmap`. Text messages are JSON status packets
     "wsFrames": "/ws/frames",
     "sensors": "/api/sensors",
     "sensorsWs": "/ws/sensors",
-    "webrtc": "/api/rtc/offer"
+    "webrtc": "/api/rtc/offer",
+    "livekit": "/api/livekit/token"
   }
 }
 ```
@@ -395,11 +444,11 @@ decodes the JPEG with `createImageBitmap`. Text messages are JSON status packets
 { "ok": true, "uptimeSec": 3600, "camera": "live", "sensors": "live" }
 ```
 
-Used by Render and Docker health checks.
+Used by load balancers and Docker health checks.
 
 ---
 
-## 6. Firmware downloads
+## 7. Firmware downloads
 
 ```text
 GET /firmware/esp32cam-wifimanager/esp32cam-wifimanager.ino
@@ -412,7 +461,7 @@ both files.
 
 ---
 
-## 7. Error format
+## 8. Error format
 
 ```json
 {

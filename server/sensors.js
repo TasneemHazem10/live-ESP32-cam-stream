@@ -80,6 +80,7 @@ export class SensorStore {
     this.listeners = new Set();
     this.lastRealAt = 0;
     this.lastDemoAt = 0;
+    this.realSeen = false;
     this.demoTimer = null;
     this.demoStartedAt = Date.now();
   }
@@ -169,7 +170,15 @@ export class SensorStore {
 
     this.latest = record;
     this.devices.set(deviceId, record);
-    if (source === 'live') this.lastRealAt = now;
+    if (source === 'live') {
+      this.lastRealAt = now;
+      // Once the real ESP32 has reported, never mix simulated numbers back in.
+      this.realSeen = true;
+      if (this.demoTimer) {
+        clearInterval(this.demoTimer);
+        this.demoTimer = null;
+      }
+    }
 
     this.history.push({ ...readings, t: now, demo: source === 'demo' });
     if (this.history.length > MAX_HISTORY) this.history.splice(0, this.history.length - MAX_HISTORY);
@@ -211,7 +220,7 @@ export class SensorStore {
   }
 
   maybeGenerateDemo() {
-    if (!config.demoFallback) return;
+    if (!config.demoFallback || this.realSeen) return;
     if (Date.now() - this.lastRealAt < 6000) return;
 
     const t = (Date.now() - this.demoStartedAt) / 1000;
@@ -238,12 +247,18 @@ export class SensorStore {
 
   getStatus() {
     const latest = this.getLatest();
-    const connected = Boolean(latest?.connected);
+    const ageMs = latest?.ageMs ?? Infinity;
+    const fresh = ageMs < 10_000;
+    // Simulated readings count as connected while the simulator is enabled, so
+    // the dashboard shows "SIM" instead of looking permanently offline.
+    const live = latest?.source === 'live' && fresh;
+    const demo = latest?.source === 'demo' && fresh && config.demoFallback;
+    const connected = live || demo;
     return {
       connected,
       // A stale packet must not keep the dashboard on "LIVE" forever.
       source: connected ? latest.source : 'none',
-      demo: connected && latest?.source === 'demo',
+      demo,
       deviceId: latest?.deviceId || null,
       lastSeen: latest ? new Date(latest.ts).toISOString() : null,
       ageMs: latest?.ageMs ?? null,

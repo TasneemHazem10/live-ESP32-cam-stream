@@ -4,12 +4,48 @@ const WS_MAX_RECONNECTS = 5;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+let livekitLoader = null;
+
+/** Load the LiveKit browser SDK from the local relay (no CDN needed). */
+function loadLiveKit() {
+  if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
+  if (livekitLoader) return livekitLoader;
+
+  livekitLoader = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = api('/vendor/livekit-client.umd.js');
+    script.async = true;
+    script.onload = () => {
+      if (window.LivekitClient) resolve(window.LivekitClient);
+      else reject(new Error('LiveKit SDK did not initialise'));
+    };
+    script.onerror = () => reject(new Error('Could not load the LiveKit SDK'));
+    document.head.appendChild(script);
+  });
+
+  return livekitLoader;
+}
+
+async function fetchLiveKitToken(role, label) {
+  const identity = `${role}-${label || ''}${Math.random().toString(36).slice(2, 9)}`;
+  const response = await fetch(
+    api(`/api/livekit/token?role=${encodeURIComponent(role)}&identity=${encodeURIComponent(identity)}`),
+    { cache: 'no-store' },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.token) {
+    throw new Error(payload.message || `LiveKit token request failed (HTTP ${response.status})`);
+  }
+  return payload;
+}
+
 export class LiveStream {
-  constructor({ onFrame, onState, onStats, onError } = {}) {
+  constructor({ onFrame, onState, onStats, onError, onSensor } = {}) {
     this.onFrame = onFrame || (() => {});
     this.onState = onState || (() => {});
     this.onStats = onStats || (() => {});
     this.onError = onError || (() => {});
+    this.onSensor = onSensor || (() => {});
 
     this.mode = 'ws';
     this.started = false;
@@ -23,6 +59,16 @@ export class LiveStream {
     this.reconnectTimer = null;
     this.statsTimer = null;
     this.rtcPeerId = null;
+
+    // LiveKit / laptop camera state
+    this.lkRoom = null;
+    this.lkVideo = null;
+    this.lkRaf = null;
+    this.lkLastPaint = 0;
+    this.lkReconnects = 0;
+    this.lkReconnectTimer = null;
+    this.localStream = null;
+    this.localVideo = null;
 
     this.decoding = false;
     this.pendingFrame = null;
@@ -64,12 +110,17 @@ export class LiveStream {
     this.latency = null;
     this.connected = false;
     this.reconnectAttempts = 0;
+    this.lkReconnects = 0;
     this.lastStateKey = '';
     this.setState('connecting');
 
     this.statsTimer = setInterval(() => this.reportStats(run), 1000);
 
-    if (mode === 'webrtc') {
+    if (mode === 'camera') {
+      this.startLocalCamera(run).catch((error) => this.fail(error, run));
+    } else if (mode === 'livekit') {
+      this.startLiveKit(run).catch((error) => this.fail(error, run));
+    } else if (mode === 'webrtc') {
       this.startWebRtc(run).catch((error) => this.fail(error, run));
     } else if (mode === 'mjpeg') {
       this.startMjpeg(run);
@@ -134,6 +185,8 @@ export class LiveStream {
       this.rtcPeerId = null;
     }
 
+    this.stopLiveKit();
+
     if (this.mjpegImg) {
       this.mjpegImg.onload = null;
       this.mjpegImg.onerror = null;
@@ -164,7 +217,7 @@ export class LiveStream {
     this.connected = false;
     this.setState('error');
     this.onError({
-      code: error?.code || 'stream_error',
+      code: error?.code || error?.name || 'stream_error',
       message: error?.message || String(error),
       mode: this.mode,
     });
@@ -525,6 +578,270 @@ export class LiveStream {
         soft: true,
       });
     }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Laptop camera + LiveKit                                            */
+  /* ------------------------------------------------------------------ */
+
+  stopLiveKit() {
+    if (this.lkRaf) cancelAnimationFrame(this.lkRaf);
+    if (this.lkReconnectTimer) clearTimeout(this.lkReconnectTimer);
+    this.lkRaf = null;
+    this.lkReconnectTimer = null;
+
+    if (this.localStream) {
+      for (const track of this.localStream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    this.localStream = null;
+
+    if (this.localVideo) {
+      this.localVideo.pause?.();
+      this.localVideo.srcObject = null;
+      this.localVideo.remove();
+    }
+    this.localVideo = null;
+
+    if (this.lkVideo) {
+      this.lkVideo.pause?.();
+      this.lkVideo.srcObject = null;
+      this.lkVideo.remove();
+    }
+    this.lkVideo = null;
+
+    if (this.lkRoom) {
+      try {
+        this.lkRoom.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.lkRoom = null;
+    this.lkLastPaint = 0;
+  }
+
+  handleLiveKitData(payload) {
+    try {
+      let bytes = payload;
+      if (payload instanceof ArrayBuffer) bytes = new Uint8Array(payload);
+      if (!(bytes instanceof Uint8Array)) return;
+      const message = JSON.parse(new TextDecoder().decode(bytes));
+      if (message?.type === 'sensor' && message.readings) {
+        this.onSensor(message);
+      }
+    } catch {
+      /* ignore malformed data */
+    }
+  }
+
+  startLiveKitPump(run, source) {
+    if (this.lkRaf) cancelAnimationFrame(this.lkRaf);
+    const pump = (now) => {
+      if (!this.started || run !== this.runId) return;
+      const element = source || this.lkVideo || this.localVideo;
+      if (element && element.readyState >= 2 && element.videoWidth) {
+        // ~25 fps is plenty for the dashboard canvas and keeps CPU cool.
+        if (!this.lkLastPaint || now - this.lkLastPaint > 40) {
+          this.lkLastPaint = now;
+          this.emitFrame(
+            element,
+            {
+              width: element.videoWidth,
+              height: element.videoHeight,
+              ts: Date.now(),
+              source: 'live',
+            },
+            'image',
+          );
+        }
+      }
+      this.lkRaf = requestAnimationFrame(pump);
+    };
+    this.lkRaf = requestAnimationFrame(pump);
+  }
+
+  attachLiveKitVideo(track, run) {
+    const LivekitClient = window.LivekitClient;
+    if (!this.lkVideo) {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.style.cssText =
+        'position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;inset-inline-start:-10px;';
+      document.body.appendChild(video);
+      this.lkVideo = video;
+    }
+
+    track.attach(this.lkVideo);
+    this.lastSource = 'live';
+    this.lkVideo.play().catch(() => {});
+    // Some browsers only expose frames after metadata loads.
+    this.lkVideo.addEventListener('loadeddata', () => {
+      if (run === this.runId) this.startLiveKitPump(run, this.lkVideo);
+    }, { once: true });
+    this.startLiveKitPump(run, this.lkVideo);
+  }
+
+  async startLiveKit(run) {
+    if (!this.started || run !== this.runId) return;
+
+    const configResponse = await fetch(api('/api/livekit/config'), { cache: 'no-store' });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!config.enabled) {
+      throw Object.assign(new Error('LiveKit is not configured on the server'), {
+        code: 'livekit_not_configured',
+      });
+    }
+
+    const LivekitClient = await loadLiveKit();
+    if (!this.started || run !== this.runId) return;
+
+    const info = await fetchLiveKitToken('viewer', 'viewer-');
+    if (!this.started || run !== this.runId) return;
+
+    const room = new LivekitClient.Room({
+      adaptiveStream: false,
+      dynacast: false,
+    });
+    this.lkRoom = room;
+    this.lastSource = 'live';
+
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+      if (run !== this.runId) return;
+      if (track.kind === 'video' || track.kind === LivekitClient.Track.Kind.Video) {
+        this.attachLiveKitVideo(track, run);
+      }
+    });
+
+    room.on(LivekitClient.RoomEvent.DataReceived, (payload) => {
+      if (run !== this.runId) return;
+      this.handleLiveKitData(payload);
+    });
+
+    room.on(LivekitClient.RoomEvent.Disconnected, () => {
+      if (run !== this.runId || !this.started) return;
+      this.connected = false;
+      this.scheduleLiveKitReconnect(run);
+    });
+
+    await room.connect(info.url, info.token, { autoSubscribe: true });
+    if (!this.started || run !== this.runId) {
+      try {
+        room.disconnect();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    this.lkReconnects = 0;
+    this.setState('connecting');
+  }
+
+  scheduleLiveKitReconnect(run) {
+    if (!this.started || run !== this.runId || this.lkReconnectTimer) return;
+    this.lkReconnects += 1;
+    if (this.lkReconnects > 4) {
+      this.fail({ code: 'livekit_failed', message: 'LiveKit connection lost' }, run);
+      return;
+    }
+    this.setState('reconnecting');
+    this.lkReconnectTimer = setTimeout(() => {
+      this.lkReconnectTimer = null;
+      if (!this.started || run !== this.runId) return;
+      this.startLiveKit(run).catch((error) => this.fail(error, run));
+    }, 2200);
+  }
+
+  async startLocalCamera(run) {
+    if (!this.started || run !== this.runId) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('This browser does not expose a camera (getUserMedia unavailable)');
+    }
+
+    const media = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        frameRate: { ideal: 24, max: 30 },
+        facingMode: 'user',
+      },
+    });
+
+    if (!this.started || run !== this.runId) {
+      for (const track of media.getTracks()) track.stop();
+      return;
+    }
+
+    this.localStream = media;
+    this.lastSource = 'live';
+
+    const video = document.createElement('video');
+    video.muted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', 'true');
+    video.srcObject = media;
+    video.style.cssText =
+      'position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;inset-inline-start:-10px;';
+    document.body.appendChild(video);
+    this.localVideo = video;
+
+    await video.play().catch(() => {});
+    this.startLiveKitPump(run, video);
+    this.setState('connected');
+
+    // Local preview already works. Publishing to LiveKit is optional and only
+    // fails softly when the API secret has not been filled in yet.
+    this.publishLocalCamera(media, run).catch((error) => {
+      this.onError({
+        code: 'livekit_publish_failed',
+        message: error.message,
+        mode: 'camera',
+        soft: true,
+      });
+    });
+  }
+
+  async publishLocalCamera(media, run) {
+    const configResponse = await fetch(api('/api/livekit/config'), { cache: 'no-store' });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!config.enabled) return false;
+
+    const LivekitClient = await loadLiveKit();
+    if (!this.started || run !== this.runId) return false;
+
+    const info = await fetchLiveKitToken('publisher', 'camera-');
+    const room = new LivekitClient.Room({ adaptiveStream: false, dynacast: false });
+    this.lkRoom = room;
+
+    room.on(LivekitClient.RoomEvent.DataReceived, (payload) => {
+      if (run !== this.runId) return;
+      this.handleLiveKitData(payload);
+    });
+    room.on(LivekitClient.RoomEvent.Disconnected, () => {
+      if (run === this.runId && this.started) this.setState('reconnecting');
+    });
+
+    await room.connect(info.url, info.token, { autoSubscribe: false });
+
+    const videoTrack = media.getVideoTracks()[0];
+    if (videoTrack) {
+      await room.localParticipant.publishTrack(videoTrack, {
+        name: 'camera',
+        simulcast: false,
+      });
+    }
+    return true;
   }
 
   waitForIceGathering(pc, timeoutMs) {

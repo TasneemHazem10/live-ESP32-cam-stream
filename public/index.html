@@ -232,6 +232,10 @@
                   <div class="wait-rings"><span></span><span></span><span></span></div>
                   <strong data-i18n="studio.waitTitle">بانتظار إشارة الكاميرا</strong>
                   <p data-i18n="studio.waitSub">الخادم جاهز. شغّل ESP32-CAM أو المحاكي لعرض البث.</p>
+                  <button class="btn btn-primary small wait-camera" id="wait-camera-btn" type="button">
+                    <svg class="icon"><use href="#i-camera"></use></svg>
+                    <span data-i18n="studio.startCamera">تشغيل كاميرا اللابتوب</span>
+                  </button>
                   <code>POST /api/upload-frame</code>
                 </div>
 
@@ -247,8 +251,13 @@
                     <button class="mode-btn" data-mode="webrtc" type="button">WebRTC</button>
                     <button class="mode-btn" data-mode="mjpeg" type="button">MJPEG</button>
                     <button class="mode-btn" data-mode="poll" type="button">HTTP</button>
+                    <button class="mode-btn" data-mode="livekit" type="button">LiveKit</button>
                   </div>
                   <div class="icon-actions">
+                    <button class="mode-btn camera-btn" id="local-camera-btn" data-mode="camera" type="button" data-i18n-title="studio.myCamera" title="Laptop camera" aria-label="Laptop camera">
+                      <svg class="icon"><use href="#i-camera"></use></svg>
+                      <span data-i18n="studio.myCamera">Laptop camera</span>
+                    </button>
                     <button class="icon-btn" id="snapshot-btn" type="button" data-i18n-title="studio.snapshot" title="Snapshot" aria-label="Snapshot">
                       <svg class="icon"><use href="#i-snapshot"></use></svg>
                     </button>

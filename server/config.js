@@ -22,6 +22,18 @@ const list = (value) =>
 
 const stunServers = list(process.env.STUN_SERVERS);
 
+// LiveKit secrets are long random strings. Treat obvious placeholders as unset
+// so the dashboard says "not configured" instead of minting tokens that the
+// LiveKit server will reject with "invalid token".
+const livekitSecret = (() => {
+  const value = (process.env.LIVEKIT_API_SECRET || '').trim();
+  if (!value) return '';
+  if (value.length < 20) return '';
+  if (/^(paste|your|replace|changeme|placeholder)/i.test(value)) return '';
+  if (/^[•*x]+$/i.test(value)) return '';
+  return value;
+})();
+
 export const ROOT_DIR = path.resolve(here, '..');
 export const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
 
@@ -45,6 +57,16 @@ export const config = {
   frameStaleMs: int(process.env.FRAME_STALE_MS, 5000),
 
   maxWebRtcPeers: Math.min(12, Math.max(1, int(process.env.MAX_WEBRTC_PEERS, 4))),
+  // LiveKit Cloud is the hosted media path. It replaces Render for video:
+  // the camera/browser publishes a WebRTC track and every viewer subscribes
+  // from anywhere, while this Node server only mints short-lived tokens.
+  livekit: {
+    url: (process.env.LIVEKIT_URL || '').trim(),
+    apiKey: (process.env.LIVEKIT_API_KEY || '').trim(),
+    apiSecret: livekitSecret,
+    room: (process.env.LIVEKIT_ROOM || 'live').trim().slice(0, 64) || 'live',
+    ttlSeconds: Math.min(24 * 60 * 60, Math.max(60, int(process.env.LIVEKIT_TOKEN_TTL, 6 * 60 * 60))),
+  },
   metered: {
     domain: (process.env.METERED_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     apiKey: process.env.METERED_API_KEY || '',
@@ -60,4 +82,8 @@ export const config = {
 
 export function hasUploadAuth() {
   return Boolean(config.uploadToken);
+}
+
+export function hasLiveKit() {
+  return Boolean(config.livekit.url && config.livekit.apiKey && config.livekit.apiSecret);
 }

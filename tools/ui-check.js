@@ -182,7 +182,13 @@ async function main() {
   console.log(`  ➜  ${executablePath}`);
   console.log('');
 
-  const browser = await chromium.launch({ executablePath, headless: true });
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    // The dashboard now opens the laptop camera by default; give headless
+    // Chromium a synthetic webcam so the UI check stays deterministic.
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  });
 
   try {
     /* ------------------------------------------------------------------ */
@@ -195,6 +201,7 @@ async function main() {
       locale: 'ar-EG',
       timezoneId: 'Asia/Riyadh',
       reducedMotion: 'no-preference',
+      permissions: ['camera'],
     });
     const page = await context.newPage();
     const errors = [];
@@ -443,6 +450,7 @@ async function main() {
       acceptDownloads: true,
       locale: 'ar-EG',
       timezoneId: 'Asia/Riyadh',
+      permissions: ['camera'],
     });
     const mobile = await mobileContext.newPage();
     const mobileErrors = [];

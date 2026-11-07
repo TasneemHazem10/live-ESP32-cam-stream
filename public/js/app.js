@@ -12,8 +12,8 @@ const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll'];
-const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP' };
+const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit', 'camera'];
+const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT', camera: 'CAMERA' };
 const SENSOR_STALE_MS = 12_000;
 
 const SENSOR_DEFS = {
@@ -373,6 +373,24 @@ const stream = new LiveStream({
       showToast(t('toast.stun'), 'warn');
       return;
     }
+    if (error.code === 'livekit_not_configured') {
+      showToast(t('toast.livekitMissing'), 'warn', 6000);
+      return;
+    }
+    if (error.code === 'livekit_publish_failed') {
+      // The laptop preview is already live; only remote sharing failed.
+      if (state.mode === 'camera') showToast(t('toast.livekitPublish'), 'warn', 6000);
+      return;
+    }
+    if (
+      error.code === 'NotAllowedError' ||
+      error.code === 'PermissionDeniedError' ||
+      /permission|denied|not allowed/i.test(error.message || '')
+    ) {
+      showToast(t('toast.cameraDenied'), 'error', 6000);
+      if (state.mode === 'camera') showWait();
+      return;
+    }
     if (error.code === 'rtc_unavailable') {
       showToast(t('toast.rtcUnavailable'), 'error');
     }
@@ -382,6 +400,11 @@ const stream = new LiveStream({
       return;
     }
     showToast(error.message || t('status.offline'), 'error');
+  },
+  onSensor(message) {
+    if (message?.type === 'sensor' && message.readings) {
+      applySensorRecord(message);
+    }
   },
 });
 
@@ -478,6 +501,8 @@ function startMode(mode, { announce = true } = {}) {
 
   if (announce) {
     if (mode === 'webrtc') showToast(t('toast.webrtcStart'), 'info');
+    else if (mode === 'camera') showToast(t('toast.cameraStart'), 'info', 3600);
+    else if (mode === 'livekit') showToast(t('toast.livekitStart'), 'info');
     else showToast(t('toast.mode', { mode: t(`mode.${mode}`) }), 'info', 2600);
   }
 }
@@ -1010,6 +1035,10 @@ function setupStageControls() {
     setIntensity(event.target.value);
   });
 
+  $('wait-camera-btn')?.addEventListener('click', () => {
+    startMode('camera');
+  });
+
   dom.tourBtn?.addEventListener('click', startTour);
 
   dom.mirrorBtn?.addEventListener('click', () => {
@@ -1289,7 +1318,8 @@ updateCameraPill();
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
-startMode('ws', { announce: false });
+// With no ESP32-CAM attached yet, open the laptop camera automatically.
+startMode('camera', { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
 // waiting panel instead of leaving a frozen frame on screen.
