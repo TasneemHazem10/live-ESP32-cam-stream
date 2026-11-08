@@ -128,9 +128,35 @@ const localAddresses = new Set(
     .filter(Boolean),
 );
 
+// A tunnel or reverse proxy (Cloudflare Tunnel, ngrok, VS Code forwarding…)
+// forwards requests to the relay from loopback. The source address alone would
+// then make every remote viewer look like the laptop and prompt for a camera.
+// Only accept loopback/interface sources when the browser also used a local or
+// private host name, never a public tunnel domain.
+function isPrivateHost(hostHeader) {
+  const raw = String(hostHeader || '').trim();
+  if (!raw) return false;
+  let host;
+  try {
+    host = new URL(`http://${raw}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  host = host.replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host === '::1' || host === '127.0.0.1') return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (/\.local$/.test(host)) return true;
+  return localAddresses.has(host);
+}
+
 function isLocalClient(req) {
   const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-  return ip === '127.0.0.1' || ip === '::1' || localAddresses.has(ip);
+  const fromThisMachine = ip === '127.0.0.1' || ip === '::1' || localAddresses.has(ip);
+  return fromThisMachine && isPrivateHost(req.get('host'));
 }
 
 function pickDimension(queryValue, headerValue, fallback) {
@@ -227,6 +253,15 @@ app.post(
         ok: false,
         error: 'forbidden_origin',
         message: 'Laptop frames must be posted from the dashboard origin.',
+      });
+    }
+    // Even a same-origin viewer must not be able to inject frames. Only the
+    // relay machine, opened through a local/private host, may publish here.
+    if (!isLocalClient(req)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden_local',
+        message: 'Only the relay laptop can publish camera frames.',
       });
     }
     return next();
@@ -559,7 +594,9 @@ app.use(
         res.setHeader('Cache-Control', 'no-cache');
       }
       if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
-        res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+        // The dashboard changes often during setup; always revalidate so a
+        // normal reload picks up new role/camera logic without a hard refresh.
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       }
     },
   }),

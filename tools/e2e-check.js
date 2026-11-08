@@ -6,6 +6,7 @@
  *   npm run test:e2e     # in another
  */
 
+import http from 'node:http';
 import WebSocket from 'ws';
 
 const BASE = (process.env.SERVER_URL || process.argv[2] || 'http://localhost:3000').replace(/\/+$/, '');
@@ -20,6 +21,83 @@ const dim = (text) => `\x1b[2m${text}\x1b[0m`;
 
 function authHeaders(extra = {}) {
   return TOKEN ? { ...extra, 'x-upload-token': TOKEN } : extra;
+}
+
+// Node's fetch() always overwrites the Host header, so use the http module to
+// simulate a tunnel/proxy that forwards a request with a public Host name.
+function statusWithHost(hostHeader) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(BASE);
+    const req = http.request(
+      {
+        host: target.hostname,
+        port: target.port || 80,
+        path: '/api/status',
+        headers: { Host: hostHeader },
+        timeout: 5000,
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy(new Error('request timed out'));
+    });
+    req.end();
+  });
+}
+
+// Same-origin request that reaches the relay through a public host name.
+function postFrameWithHost({ hostHeader, origin, body }) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(BASE);
+    const req = http.request(
+      {
+        host: target.hostname,
+        port: target.port || 80,
+        path: '/api/laptop/frame?device=REMOTE-TEST',
+        method: 'POST',
+        headers: {
+          Host: hostHeader,
+          Origin: origin,
+          'Content-Type': 'image/jpeg',
+          'Content-Length': body.length,
+        },
+        timeout: 5000,
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk) => {
+          text += chunk;
+        });
+        res.on('end', () => {
+          let parsed = {};
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            /* non-JSON response */
+          }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy(new Error('request timed out'));
+    });
+    req.end(body);
+  });
 }
 
 async function test(name, fn) {
@@ -86,6 +164,16 @@ async function main() {
     return `${body.camera.width}x${body.camera.height} @ ${body.camera.fps} fps, ICE=${body.webrtc.iceSource}`;
   });
 
+  await test('GET /api/status marks only local/private hosts as the laptop', async () => {
+    const local = await statusWithHost('localhost:3000');
+    const lan = await statusWithHost('192.168.1.7:3000');
+    const tunnel = await statusWithHost('public.example.test');
+    assert(local.local === true, 'localhost should be local');
+    assert(lan.local === true, 'a private LAN host should be local');
+    assert(tunnel.local === false, 'a public tunnel host must not be treated as the laptop');
+    return 'localhost=true, private-ip=true, public-host=false';
+  });
+
   let uploadedSeq = 0;
   await test('POST /api/upload-frame converts RGB565 to JPEG', async () => {
     const width = 64;
@@ -143,7 +231,17 @@ async function main() {
       signal: AbortSignal.timeout(10_000),
     });
     assert(denied.status === 403, `expected 403 for a cross-origin upload, got ${denied.status}`);
-    return `seq=${sameBody.seq}, jpeg=${sameBody.jpegBytes}B, cross-origin=403`;
+
+    const remote = await postFrameWithHost({
+      hostHeader: 'public.example.test',
+      origin: 'http://public.example.test',
+      body: frame,
+    });
+    assert(
+      remote.status === 403 && remote.body.error === 'forbidden_local',
+      `expected forbidden_local through a public host, got ${remote.status} ${remote.body.error || ''}`,
+    );
+    return `seq=${sameBody.seq}, jpeg=${sameBody.jpegBytes}B, cross-origin=403, remote-local=403`;
   });
 
   await test('POST /api/sensors accepts live telemetry', async () => {

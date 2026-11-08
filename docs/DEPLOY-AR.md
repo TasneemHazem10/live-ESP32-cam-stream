@@ -78,7 +78,7 @@ WebSocket / WebRTC / MJPEG / HTTP، ولقطة PNG بعد وصول البث.
 npm run dev          # إعادة التشغيل التلقائي عند تعديل الملفات
 npm run sim:camera   # إرسال إطارات RGB565 صناعية إلى الخادم المحلي
 npm run sim:sensors  # إرسال قراءات حساسات صناعية
-npm run test:e2e     # 13 فحصًا للـ HTTP وWebSocket وMJPEG والحساسات
+npm run test:e2e     # 14 فحصًا للـ HTTP وWebSocket وMJPEG والحساسات
 npm run test:webrtc  # فحص WebRTC وdata channel ورأس الإطار
 npm run test:ui      # فحص الواجهة عبر Chrome (يتطلب Chrome مثبتًا)
 ```

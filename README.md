@@ -123,6 +123,11 @@ camera access, and the camera buttons are hidden. The server's `local` flag in `
 decides the role from the request's source address, so the laptop still owns the camera even when
 it opens its own dashboard through the LAN IP.
 
+> **Using a public tunnel (Cloudflare Tunnel, ngrok, …)?** Open **http://localhost:3000** on the
+> laptop to publish, and give viewers the public tunnel URL. A public hostname is always treated
+> as watch-only, so tunnel visitors are never prompted for a camera — even though the proxy
+> connects to the relay from `127.0.0.1`.
+
 For viewing from outside the LAN, set the LiveKit credentials (see [Deployment](#deployment)) and
 choose **LiveKit** on the viewer. `DEMO_FALLBACK=true` keeps a synthetic camera feed for the
 WebSocket/MJPEG transports and the sensor simulator on; it does not add a camera prompt anywhere.
@@ -305,7 +310,7 @@ The checks expect a running relay at `http://localhost:3000`:
 
 ```bash
 npm start                 # terminal 1
-npm run test:e2e          # terminal 2 — 13 HTTP/WS/MJPEG/sensor checks
+npm run test:e2e          # terminal 2 — 14 HTTP/WS/MJPEG/sensor checks
 npm run test:webrtc       # offer/answer + 12-byte header + live frames
 npm run test:ui           # headless Chrome UI suite, saves screenshots/
 ```
@@ -351,7 +356,9 @@ sensor simulator with a `SIM` badge.
 **Only this laptop publishes video.** Other devices open the dashboard and act as viewers; they
 are never asked for camera access and the camera buttons are hidden. On the same Wi-Fi they can
 watch through the relay at `http://LAPTOP-LAN-IP:3000` using WebSocket, MJPEG or HTTP with no
-LiveKit account. Outside the LAN, use LiveKit (step 2).
+LiveKit account. Outside the LAN, use LiveKit (step 2) or a tunnel — but in that case keep the
+laptop's own dashboard open at **http://localhost:3000**, because a public tunnel URL is always
+watch-only.
 
 Useful environment values for this phase:
 
@@ -484,6 +491,7 @@ that talks to a relay exposed through a tunnel:
 | WebRTC connects but no frames | Server demo/camera stopped | Check `/api/status`; confirm `frameReady` and network |
 | TURN pill says `STUN` | Metered not configured or credentials failed | Set `METERED_DOMAIN` + `METERED_API_KEY`, check server logs |
 | Sensors show `--` | No packet yet | Confirm `/api/sensors` URL and JSON body; check `/api/sensors/devices` |
+| Every visitor is asked for camera access | Everyone is being classified as the laptop, usually because a tunnel/proxy forwards from `127.0.0.1` | Update to this build, hard-refresh, and open the laptop at `http://localhost:3000`; public tunnel hosts are now watch-only |
 | Laptop camera does not start | Browser blocked the camera, or the dashboard is open on a viewer device | Allow camera permission on the relay laptop; only the laptop should show the camera buttons. LAN viewers use the relay stream, not their own camera |
 | LiveKit mode says "not configured" | `LIVEKIT_API_SECRET` is missing or still a placeholder | Paste the real secret from LiveKit **Settings → Keys**, restart the relay |
 | Remote viewer stays black | No publisher in the room, or the secret is invalid | Keep the laptop dashboard open (it publishes the webcam); check `/api/livekit/config` reports `enabled: true` |

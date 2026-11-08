@@ -100,6 +100,11 @@ Restart the relay after every `.env` change.
 - **Viewer outside the LAN:** open the dashboard and click **LiveKit**. The laptop's camera track
   appears in the same canvas with all effects, and sensor packets arrive on the room data channel.
 
+> If you expose the relay through a tunnel (Cloudflare Tunnel, ngrok, …), keep the laptop on
+> **http://localhost:3000** and share the tunnel URL with viewers. A public hostname is always
+> treated as watch-only, so tunnel visitors never get a camera prompt even though the proxy
+> connects to the relay from loopback.
+
 The API secret stays on the laptop; browsers only receive short-lived join tokens from
 `/api/livekit/token`. If the secret is missing, the laptop camera still works locally and on the
 LAN, and the LiveKit mode shows a clear “not configured” message.
@@ -338,6 +343,7 @@ without it, and camera uploads never need TURN.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| Every visitor is asked for camera access | Everyone is being classified as the laptop (common with a tunnel/proxy forwarding from `127.0.0.1`) | Update and hard-refresh; open the laptop at `http://localhost:3000`, share the LAN/tunnel URL with viewers. Public hosts are watch-only |
 | Laptop camera does not start | Browser blocked it | Allow camera permission on the relay laptop; use `localhost` or HTTPS there |
 | `getUserMedia is not defined` on a phone | Phone is a viewer and should not open a camera | Nothing to fix: watch the relay stream. Use **LiveKit** for viewing outside the LAN |
 | LiveKit mode says “not configured” | Secret missing/placeholder | Paste the real secret from LiveKit **Settings → Keys**, restart |

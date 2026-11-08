@@ -76,8 +76,9 @@ Errors:
 
 The relay laptop's dashboard compresses its own webcam to JPEG and posts it here so every other
 device can watch the same stream. This route **does not require `UPLOAD_TOKEN`**; instead it only
-accepts **same-origin** browser requests. A request whose `Origin` header does not match the
-request `Host` is rejected with `403 forbidden_origin`.
+accepts **same-origin** requests **from the relay machine** (loopback/private host). A request
+whose `Origin` header does not match the request `Host` is rejected with `403 forbidden_origin`;
+a same-origin request from another device is rejected with `403 forbidden_local`.
 
 Query parameters are the same as `/api/upload-frame` (`w`, `h`, `device`, …). The body is a
 complete JPEG; RGB565 is also accepted but browsers always send JPEG.
@@ -94,6 +95,7 @@ out through `/ws/frames`, `/stream.mjpeg`, `/api/frame.jpg` and WebRTC, and set 
 | Status | `error` | Meaning |
 | --- | --- | --- |
 | `403` | `forbidden_origin` | The `Origin` header does not match the dashboard host |
+| `403` | `forbidden_local` | The request is same-origin but not from the relay machine |
 | `400` | `frame_rejected` | Body is not a valid JPEG |
 
 ### `GET /api/frame.jpg`
@@ -465,10 +467,13 @@ into the room data channel with topic `sensors` as
 ```
 
 `local` is `true` only when the request comes from the relay machine itself (loopback or one of
-its own interface addresses). The dashboard uses it to decide the role: `true` means this browser
-may open the webcam and publish; `false` means a viewer that must never call `getUserMedia`.
-Because the check uses the source address, the laptop still gets `local: true` when it opens its
-own dashboard through its LAN IP.
+its own interface addresses) **and** the browser used a local/private host name
+(`localhost`, `127.0.0.1`, `192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, `*.local`). A public tunnel
+or hosted frontend host always returns `false`, even though the proxy connects to the relay from
+loopback. The dashboard uses this to decide the role: `true` means this browser may open the
+webcam and publish; `false` means a viewer that must never call `getUserMedia`. Because the check
+uses the source address, the laptop still gets `local: true` when it opens its own dashboard
+through its LAN IP.
 
 ### `GET /healthz`
 

@@ -24,11 +24,31 @@ function isRelayLaptop() {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 }
 
+// Camera publishing is only allowed from a local/private origin. A public
+// tunnel URL (Cloudflare Tunnel, ngrok, a hosted frontend…) is watch-only even
+// if the relay is reached through a proxy that makes the source address look
+// local. This is what stops remote visitors from being prompted for a camera.
+function isPrivateHostname(host) {
+  const name = String(host || '')
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
+  if (!name) return false;
+  if (name === 'localhost' || name === '::1' || name === '127.0.0.1' || /^127\./.test(name)) return true;
+  if (/^10\./.test(name)) return true;
+  if (/^192\.168\./.test(name)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(name)) return true;
+  return /\.local$/.test(name);
+}
+
+function isLocalOrigin() {
+  return isPrivateHostname(window.location.hostname);
+}
+
 // 'laptop' = this browser may own the camera; 'viewer' = watch-only device.
 // The server confirms the role from the request's source address, which also
 // covers the laptop opening the dashboard through its own LAN IP.
-let relayRole = isRelayLaptop() ? 'laptop' : 'unknown';
-let relayRoleLocked = isRelayLaptop();
+let relayRole = isRelayLaptop() ? 'laptop' : isLocalOrigin() ? 'unknown' : 'viewer';
+let relayRoleLocked = isRelayLaptop() || !isLocalOrigin();
 
 const SENSOR_DEFS = {
   temperature: { icon: 'thermometer', accent: '#fb923c', unit: '°C', decimals: 1, labelKey: 'sensor.temperature' },
@@ -514,6 +534,9 @@ function updateCameraPill() {
 
 function startMode(mode, { announce = true } = {}) {
   if (!MODE_IDS.includes(mode)) return;
+  // Never open a camera on a viewer device or a public origin, even if a stale
+  // URL/button somehow requests camera mode.
+  if (mode === 'camera' && (relayRole !== 'laptop' || !isLocalOrigin())) return;
   state.mode = mode;
   state.phase = 'connecting';
   state.streamConnected = false;
@@ -533,7 +556,7 @@ function startMode(mode, { announce = true } = {}) {
 }
 
 function updateCameraControls() {
-  const show = relayRole !== 'viewer';
+  const show = relayRole === 'laptop' && isLocalOrigin();
   for (const id of ['local-camera-btn', 'wait-camera-btn']) {
     const button = $(id);
     if (button) button.hidden = !show;
@@ -979,11 +1002,11 @@ async function refreshStatus() {
   // Resolve once per page load whether this browser is the relay laptop.
   if (!relayRoleLocked && typeof status.local === 'boolean') {
     relayRoleLocked = true;
-    relayRole = status.local ? 'laptop' : 'viewer';
+    relayRole = status.local && isLocalOrigin() ? 'laptop' : 'viewer';
     updateCameraControls();
     // The laptop may have opened the dashboard through its LAN IP; start
     // sharing the camera now that the server confirmed it is the local host.
-    if (status.local && state.mode === 'ws' && !stream.cameraActive) {
+    if (relayRole === 'laptop' && state.mode === 'ws' && !stream.cameraActive) {
       startMode('camera', { announce: false });
     }
   }
@@ -1024,7 +1047,7 @@ function setupModeButtons() {
     button.addEventListener('click', () => {
       const mode = button.dataset.mode;
       if (!MODE_IDS.includes(mode) || (mode === state.mode && state.streamConnected)) return;
-      if (mode === 'camera' && relayRole === 'viewer') return;
+      if (mode === 'camera' && (relayRole !== 'laptop' || !isLocalOrigin())) return;
       startMode(mode);
     });
   }
@@ -1082,7 +1105,7 @@ function setupStageControls() {
   });
 
   $('wait-camera-btn')?.addEventListener('click', () => {
-    if (relayRole === 'viewer') return;
+    if (relayRole !== 'laptop' || !isLocalOrigin()) return;
     startMode('camera');
   });
 

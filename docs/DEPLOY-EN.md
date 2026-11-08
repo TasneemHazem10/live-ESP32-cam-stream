@@ -91,7 +91,7 @@ Useful commands:
 npm run dev          # restart automatically on file changes
 npm run sim:camera   # POST synthetic RGB565 frames
 npm run sim:sensors  # POST synthetic sensor packets
-npm run test:e2e     # 13 HTTP/WebSocket/MJPEG/sensor checks
+npm run test:e2e     # 14 HTTP/WebSocket/MJPEG/sensor checks
 npm run test:webrtc  # real offer/answer + data-channel frame check
 npm run test:ui      # headless Chrome UI test
 ```
