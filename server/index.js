@@ -1,6 +1,7 @@
 import compression from 'compression';
 import express from 'express';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ROOT_DIR, config, PUBLIC_DIR, hasLiveKit, hasUploadAuth } from './config.js';
@@ -101,6 +102,37 @@ function requireToken(req, res, next) {
   });
 }
 
+// The laptop publishes its webcam frames from the dashboard itself, so this
+// route does not need (and should not expose) the firmware upload token. It is
+// limited to same-origin browser requests: another website cannot push frames
+// into the relay even when the laptop is on a shared network.
+function isSameOrigin(req) {
+  const origin = req.get('origin');
+  if (!origin) return true; // non-browser clients (curl, native)
+  try {
+    const parsed = new URL(origin);
+    return parsed.host === req.get('host');
+  } catch {
+    return false;
+  }
+}
+
+// Addresses owned by this machine. A request from one of them comes from the
+// relay laptop itself (even when it opens the dashboard through its LAN IP),
+// so only that browser should auto-start and share the webcam.
+const localAddresses = new Set(
+  Object.values(os.networkInterfaces())
+    .flat()
+    .filter(Boolean)
+    .map((iface) => String(iface.address || '').replace(/^::ffff:/, ''))
+    .filter(Boolean),
+);
+
+function isLocalClient(req) {
+  const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  return ip === '127.0.0.1' || ip === '::1' || localAddresses.has(ip);
+}
+
 function pickDimension(queryValue, headerValue, fallback) {
   const value = Number.parseInt(queryValue ?? headerValue ?? fallback, 10);
   if (!Number.isFinite(value) || value < 16 || value > 4096) return fallback;
@@ -179,6 +211,26 @@ app.post(
 app.post(
   '/api/camera/frame',
   requireToken,
+  express.raw({ type: () => true, limit: config.maxFrameBytes }),
+  uploadFrame,
+);
+
+// Laptop webcam publishing. The dashboard compresses its own camera to JPEG and
+// posts it here so every other device on the network can watch the same stream
+// through /ws/frames, /stream.mjpeg or /api/frame.jpg. No token is required —
+// the same-origin check keeps other sites from injecting frames.
+app.post(
+  '/api/laptop/frame',
+  (req, res, next) => {
+    if (!isSameOrigin(req)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'forbidden_origin',
+        message: 'Laptop frames must be posted from the dashboard origin.',
+      });
+    }
+    return next();
+  },
   express.raw({ type: () => true, limit: config.maxFrameBytes }),
   uploadFrame,
 );
@@ -419,6 +471,9 @@ app.get('/api/status', asyncRoute(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
     ok: true,
+    // True only when the dashboard is opened on the relay laptop itself.
+    // Remote viewers use this to stay in viewer mode and hide camera controls.
+    local: isLocalClient(req),
     serverTime: Date.now(),
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     camera: frameHub.getStatus(),
@@ -447,6 +502,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
     },
     endpoints: {
       upload: '/api/upload-frame',
+      laptopFrame: '/api/laptop/frame',
       frame: '/api/frame.jpg',
       mjpeg: '/stream.mjpeg',
       wsFrames: '/ws/frames',
@@ -707,6 +763,7 @@ server.listen(config.port, config.host, () => {
   console.log('  MIRSAD live relay');
   console.log(`  ➜  http://${shownHost}:${config.port}`);
   console.log(`  ➜  upload endpoint : POST /api/upload-frame (${config.defaultWidth}x${config.defaultHeight} RGB565)`);
+  console.log('  ➜  laptop camera   : POST /api/laptop/frame (same-origin JPEG relay)');
   console.log(`  ➜  demo signal     : ${config.demoFallback ? 'ON' : 'OFF'}`);
   console.log(`  ➜  upload auth     : ${hasUploadAuth() ? 'ON' : 'OFF'}`);
   console.log(`  ➜  TURN            : ${config.metered.domain && config.metered.apiKey ? 'Metered configured' : 'STUN only'}`);

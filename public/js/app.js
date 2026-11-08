@@ -16,6 +16,20 @@ const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit', 'camera'];
 const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT', camera: 'CAMERA' };
 const SENSOR_STALE_MS = 12_000;
 
+// Only the machine that runs the relay (opened as localhost) owns the camera.
+// Every other device — a phone on the LAN, a remote browser — is a viewer and
+// must never prompt for camera access.
+function isRelayLaptop() {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
+// 'laptop' = this browser may own the camera; 'viewer' = watch-only device.
+// The server confirms the role from the request's source address, which also
+// covers the laptop opening the dashboard through its own LAN IP.
+let relayRole = isRelayLaptop() ? 'laptop' : 'unknown';
+let relayRoleLocked = isRelayLaptop();
+
 const SENSOR_DEFS = {
   temperature: { icon: 'thermometer', accent: '#fb923c', unit: '°C', decimals: 1, labelKey: 'sensor.temperature' },
   humidity: { icon: 'droplet', accent: '#22d3ee', unit: '%', decimals: 1, labelKey: 'sensor.humidity' },
@@ -382,6 +396,17 @@ const stream = new LiveStream({
       if (state.mode === 'camera') showToast(t('toast.livekitPublish'), 'warn', 6000);
       return;
     }
+    if (error.code === 'relay_publish_failed') {
+      // Local preview keeps running; only the relay copy of the camera stopped.
+      if (state.mode === 'camera') {
+        showToast(
+          t(error.soft ? 'toast.relayPublishSoft' : 'toast.relayPublish'),
+          error.soft ? 'warn' : 'error',
+          7000,
+        );
+      }
+      return;
+    }
     if (
       error.code === 'NotAllowedError' ||
       error.code === 'PermissionDeniedError' ||
@@ -504,6 +529,14 @@ function startMode(mode, { announce = true } = {}) {
     else if (mode === 'camera') showToast(t('toast.cameraStart'), 'info', 3600);
     else if (mode === 'livekit') showToast(t('toast.livekitStart'), 'info');
     else showToast(t('toast.mode', { mode: t(`mode.${mode}`) }), 'info', 2600);
+  }
+}
+
+function updateCameraControls() {
+  const show = relayRole !== 'viewer';
+  for (const id of ['local-camera-btn', 'wait-camera-btn']) {
+    const button = $(id);
+    if (button) button.hidden = !show;
   }
 }
 
@@ -943,6 +976,18 @@ async function refreshStatus() {
   statusRetry = 6000;
   setPill(dom.serverPill, dom.serverPillText, t('status.serverOnline'), 'is-online');
 
+  // Resolve once per page load whether this browser is the relay laptop.
+  if (!relayRoleLocked && typeof status.local === 'boolean') {
+    relayRoleLocked = true;
+    relayRole = status.local ? 'laptop' : 'viewer';
+    updateCameraControls();
+    // The laptop may have opened the dashboard through its LAN IP; start
+    // sharing the camera now that the server confirmed it is the local host.
+    if (status.local && state.mode === 'ws' && !stream.cameraActive) {
+      startMode('camera', { announce: false });
+    }
+  }
+
   const camera = status.camera || {};
   if (!state.streamConnected && camera.source) applySource(camera.source);
 
@@ -979,6 +1024,7 @@ function setupModeButtons() {
     button.addEventListener('click', () => {
       const mode = button.dataset.mode;
       if (!MODE_IDS.includes(mode) || (mode === state.mode && state.streamConnected)) return;
+      if (mode === 'camera' && relayRole === 'viewer') return;
       startMode(mode);
     });
   }
@@ -1036,6 +1082,7 @@ function setupStageControls() {
   });
 
   $('wait-camera-btn')?.addEventListener('click', () => {
+    if (relayRole === 'viewer') return;
     startMode('camera');
   });
 
@@ -1314,12 +1361,14 @@ setupClocks();
 setupEndpoint();
 applySource('none');
 updateCameraPill();
+updateCameraControls();
 
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
-// With no ESP32-CAM attached yet, open the laptop camera automatically.
-startMode('camera', { announce: false });
+// The relay laptop publishes its webcam automatically; every other device
+// starts as a viewer of that same stream and never prompts for a camera.
+startMode(relayRole === 'laptop' ? 'camera' : 'ws', { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
 // waiting panel instead of leaving a frozen frame on screen.

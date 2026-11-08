@@ -8,8 +8,10 @@ them to JPEG on the server, and fans them out to every browser over **WebSocket*
 it needs **no public IP, no port forwarding and no NAT traversal**.
 
 Until the ESP32-CAM and sensor node are wired up, the dashboard uses the **laptop webcam** and a
-**live sensor simulator**. The Node relay runs on the laptop; **LiveKit Cloud** carries the camera
-track to remote viewers. No Render account or payment card is required.
+**live sensor simulator**. Only the relay laptop opens the camera; every other device is a viewer
+that watches the relayed stream and is **never asked for camera access**. The Node relay runs on
+the laptop; **LiveKit Cloud** optionally carries the camera track to viewers outside the LAN. No
+Render account or payment card is required.
 
 The same page shows live readings from an **ESP32 38-pin sensor node** (temperature, humidity,
 soil, light, air quality, motion, pressure, battery and RSSI). The built-in simulator updates every
@@ -52,8 +54,9 @@ remains available for restricted / carrier-grade NAT networks.
 | Area | What you get |
 | --- | --- |
 | Camera ingestion | `POST /api/upload-frame` accepts raw RGB565 LE/BE (`153,600` bytes for 320×240) or a JPEG fallback |
-| Laptop camera | Auto-starts `getUserMedia`, runs every effect locally, and publishes the track to LiveKit Cloud |
-| Remote video | LiveKit Cloud room: browsers only receive short-lived tokens minted by the relay |
+| Laptop camera | Only the relay laptop opens `getUserMedia`; it relays JPEG frames through `POST /api/laptop/frame` (same-origin, no upload token) |
+| Remote video | Every other device is a viewer: it watches the laptop stream over WebSocket/MJPEG/HTTP/WebRTC and is never asked for camera access |
+| LiveKit Cloud | Optional internet viewing: browsers only receive short-lived tokens minted by the relay |
 | Low latency delivery | WebSocket binary JPEG frames, MJPEG multipart stream, HTTP polling and WebRTC data channel |
 | WebRTC | Browser ↔ server data channel negotiated through `/api/rtc/offer`; Metered TURN credentials fetched server-side |
 | Browser effects | Water index, vegetation, thermal, night vision, edge detection, cinematic, invert and raw — all client-side canvas filters |
@@ -68,12 +71,14 @@ remains available for restricted / carrier-grade NAT networks.
 ## Architecture
 
 ```text
-┌────────────────────┐   HTTPS POST (outbound only)   ┌──────────────────────────┐
-│  ESP32-CAM         │ ─────────────────────────────► │  MIRSAD relay (Node.js)  │
-│  320×240 RGB565    │     153,600 bytes/frame        │  RGB565 → JPEG           │
-│  4 fps default     │                                │  in-memory frame hub     │
-└────────────────────┘                                │  sensor store + history  │
-                                                      │  Metered TURN credentials│
+┌────────────────────┐  POST /api/laptop/frame (JPEG) ┌──────────────────────────┐
+│  Laptop webcam     │ ─────────────────────────────► │  MIRSAD relay (Node.js)  │
+│  current source    │   same-origin, no upload token │  JPEG fan-out            │
+└────────────────────┘                                │  in-memory frame hub     │
+┌────────────────────┐   HTTPS POST (outbound only)   │  sensor store + history  │
+│  ESP32-CAM (later) │ ─────────────────────────────► │  Metered TURN credentials│
+│  320×240 RGB565    │     153,600 bytes/frame        │                          │
+└────────────────────┘                                │                          │
 ┌────────────────────┐   HTTPS POST every 2 s        │                          │
 │  ESP32 38-pin      │ ─────────────────────────────► │                          │
 │  DHT22, soil, LDR, │     JSON sensor readings       └──────────┬───────────────┘
@@ -82,9 +87,10 @@ remains available for restricted / carrier-grade NAT networks.
                                                        │
                                                        ▼
                                             ┌─────────────────────┐
-                                            │  Browser dashboard  │
+                                            │  Viewer browsers    │
                                             │  canvas + effects   │
                                             │  sensor charts      │
+                                            │  no camera prompt   │
                                             └─────────────────────┘
 ```
 
@@ -104,16 +110,22 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3000**. The page opens the **laptop camera** automatically; allow the
-browser prompt. Until the ESP32-CAM is wired up, that webcam is the live source, and the sensor
-cards run on the live simulator (`SIM` badge). Both switch to real hardware automatically:
-the first ESP32-CAM frame replaces the webcam locally, and the first sensor packet stops the
-simulator permanently.
+Open **http://localhost:3000** on the laptop. The page opens the **laptop camera** automatically;
+allow the browser prompt. That webcam is the live source for every device until the ESP32-CAM is
+wired up, and the sensor cards run on the live simulator (`SIM` badge). The first sensor packet
+stops the simulator permanently. When the ESP32-CAM starts posting, close the laptop dashboard tab
+so the board is the only video publisher; the relay always serves the newest frame.
 
-To view the camera on another device, set the LiveKit credentials (see
-[Deployment](#deployment)) and use the **LiveKit** mode. Without a camera on a machine, the page
-shows a "waiting for camera" panel; `DEMO_FALLBACK=true` adds a synthetic feed for the
-WebSocket/MJPEG transports and keeps the sensor simulator on.
+Every other device (phone, tablet, another PC) is a **viewer**. Open the same dashboard there —
+by default `http://LAPTOP-LAN-IP:3000` on the same Wi-Fi — and it plays the laptop's stream over
+WebSocket/MJPEG/HTTP. Viewer devices **never call `getUserMedia`**, so they are never asked for
+camera access, and the camera buttons are hidden. The server's `local` flag in `/api/status`
+decides the role from the request's source address, so the laptop still owns the camera even when
+it opens its own dashboard through the LAN IP.
+
+For viewing from outside the LAN, set the LiveKit credentials (see [Deployment](#deployment)) and
+choose **LiveKit** on the viewer. `DEMO_FALLBACK=true` keeps a synthetic camera feed for the
+WebSocket/MJPEG transports and the sensor simulator on; it does not add a camera prompt anywhere.
 
 Useful local commands:
 
@@ -185,6 +197,7 @@ Full request/response examples are in [`docs/API.md`](docs/API.md).
 | --- | --- | --- |
 | `POST` | `/api/upload-frame` | Upload raw RGB565 (or JPEG) with `?w=320&h=240&format=rgb565be` |
 | `POST` | `/api/camera/frame` | Alias for the same handler |
+| `POST` | `/api/laptop/frame` | Relay the laptop webcam JPEG; same-origin only, no upload token |
 | `GET` | `/api/frame.jpg` | Newest frame as JPEG |
 | `GET` | `/api/latest-frame` | 307 redirect to `/api/frame.jpg` |
 | `GET` | `/stream.mjpeg` | MJPEG stream |
@@ -292,7 +305,7 @@ The checks expect a running relay at `http://localhost:3000`:
 
 ```bash
 npm start                 # terminal 1
-npm run test:e2e          # terminal 2 — 12 HTTP/WS/MJPEG/sensor checks
+npm run test:e2e          # terminal 2 — 13 HTTP/WS/MJPEG/sensor checks
 npm run test:webrtc       # offer/answer + 12-byte header + live frames
 npm run test:ui           # headless Chrome UI suite, saves screenshots/
 ```
@@ -331,9 +344,14 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3000**. The page starts the laptop camera automatically (allow the
-browser permission prompt), applies the selected vision effect, and shows the live sensor
-simulator with a `SIM` badge.
+Open **http://localhost:3000** on the laptop. The page starts the laptop camera automatically
+(allow the browser permission prompt), applies the selected vision effect, and shows the live
+sensor simulator with a `SIM` badge.
+
+**Only this laptop publishes video.** Other devices open the dashboard and act as viewers; they
+are never asked for camera access and the camera buttons are hidden. On the same Wi-Fi they can
+watch through the relay at `http://LAPTOP-LAN-IP:3000` using WebSocket, MJPEG or HTTP with no
+LiveKit account. Outside the LAN, use LiveKit (step 2).
 
 Useful environment values for this phase:
 
@@ -349,9 +367,10 @@ LIVEKIT_ROOM=live
 `DEMO_FALLBACK=true` no longer means a fake camera: the laptop webcam is the real source. The
 simulator only fills the sensor cards, and it stops permanently after the first real ESP32 packet.
 
-> Browsers only allow `getUserMedia` in a **secure context**. `http://localhost` is secure, but
-> `http://192.168.x.x` is not. For phones on the same Wi-Fi, use the **LiveKit** mode (or put the
-> relay behind a free HTTPS tunnel such as Cloudflare Tunnel / ngrok).
+> Browsers only allow `getUserMedia` in a **secure context**. That only affects the relay laptop:
+> `http://localhost` is secure, and only the laptop opens the camera. Phones on the same Wi-Fi can
+> watch at `http://192.168.x.x:3000` as viewers with no prompt. Use LiveKit for viewers outside the
+> LAN, or a free HTTPS tunnel (Cloudflare Tunnel / ngrok) if the relay itself must be public.
 
 ### 2. LiveKit Cloud remote video
 
@@ -360,11 +379,12 @@ simulator only fills the sensor cards, and it stops permanently after the first 
    The secret is shown only once; if it is lost, create a new key.
 3. Restart the relay. The startup banner should say
    `LiveKit : wss://… · room "live"` and `/api/livekit/config` should return `"enabled": true`.
-4. **Publisher (laptop):** open the dashboard and click **Laptop camera**. The webcam preview is
-   local *and* published to LiveKit.
-5. **Viewer (phone / another city):** open the dashboard, click **LiveKit**, and the remote camera
-   track is rendered into the same canvas with all effects. Sensor packets are mirrored into the
-   LiveKit data channel by the server, so the cards stay live too.
+4. **Publisher (laptop only):** the dashboard already shares the webcam. Keep that tab open; the
+   camera keeps publishing even if you switch the laptop's own preview to another transport.
+5. **Viewer (phone / another city):** open the dashboard on the viewer device, click **LiveKit**,
+   and the laptop's camera track is rendered into the same canvas with all effects. Viewers are
+   never prompted for camera access. Sensor packets are mirrored into the LiveKit data channel by
+   the server, so the cards stay live too.
 
 The server only signs short-lived join tokens (`/api/livekit/token`); the API secret never leaves
 the machine. If the secret is missing, the laptop camera still works locally and the LiveKit mode
@@ -411,6 +431,11 @@ Find the laptop address with `ipconfig` (Windows) or `ipconfig getifaddr en0` (m
 first camera frame arrives, the dashboard source badge changes from `OFF` to `LIVE` and the
 waiting panel disappears.
 
+To make the ESP32-CAM the only video source, close the laptop dashboard tab (or stop the relay
+publisher) once the board is posting; the relay always serves the newest frame, so two publishers
+would otherwise interleave. The sensor node needs no such step — the first real packet switches
+the cards to `LIVE` and stops the simulator permanently.
+
 ### Optional: GitHub Pages frontend
 
 The relay already serves the frontend, so static hosting is only useful for a public dashboard
@@ -439,8 +464,9 @@ that talks to a relay exposed through a tunnel:
 - Tighten `ALLOWED_ORIGINS` to your dashboard origin instead of `*`.
 - Uploads are capped by `MAX_FRAME_BYTES`; frame dimensions are validated.
 - The relay is stateless apart from in-memory frames/history. Do not store secrets in the app.
-- `getUserMedia` requires a secure context: use `http://localhost` or terminate HTTPS with a
-  tunnel/reverse proxy before exposing the dashboard to other devices.
+- `getUserMedia` requires a secure context, but only the relay laptop needs it: use
+  `http://localhost` there. Viewer devices never open a camera, so `http://192.168.x.x` is fine
+  for watching the relay stream; use LiveKit or an HTTPS tunnel for viewing outside the LAN.
 
 ---
 
@@ -458,9 +484,9 @@ that talks to a relay exposed through a tunnel:
 | WebRTC connects but no frames | Server demo/camera stopped | Check `/api/status`; confirm `frameReady` and network |
 | TURN pill says `STUN` | Metered not configured or credentials failed | Set `METERED_DOMAIN` + `METERED_API_KEY`, check server logs |
 | Sensors show `--` | No packet yet | Confirm `/api/sensors` URL and JSON body; check `/api/sensors/devices` |
-| Laptop camera does not start | Browser blocked the camera or the origin is not secure | Allow camera permission; use `localhost` or HTTPS. LAN IPs need LiveKit mode or a tunnel |
+| Laptop camera does not start | Browser blocked the camera, or the dashboard is open on a viewer device | Allow camera permission on the relay laptop; only the laptop should show the camera buttons. LAN viewers use the relay stream, not their own camera |
 | LiveKit mode says "not configured" | `LIVEKIT_API_SECRET` is missing or still a placeholder | Paste the real secret from LiveKit **Settings → Keys**, restart the relay |
-| Remote viewer stays black | No publisher in the room, or the secret is invalid | Start **Laptop camera** on one device first; check `/api/livekit/config` reports `enabled: true` |
+| Remote viewer stays black | No publisher in the room, or the secret is invalid | Keep the laptop dashboard open (it publishes the webcam); check `/api/livekit/config` reports `enabled: true` |
 | UI test cannot find Chrome | No system Chrome/Edge | Set `CHROME_PATH` to the executable |
 
 ---

@@ -120,6 +120,32 @@ async function main() {
     return `${buffer.length}B, seq=${response.headers.get('x-frame-seq')}`;
   });
 
+  await test('POST /api/laptop/frame relays same-origin JPEGs only', async () => {
+    const frameResponse = await expectOk('/api/frame.jpg');
+    assert(frameResponse.ok, `frame fetch returned HTTP ${frameResponse.status}`);
+    const frame = Buffer.from(await frameResponse.arrayBuffer());
+
+    const same = await fetch(`${BASE}/api/laptop/frame?device=LAPTOP-CAM&w=64&h=48`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/jpeg', origin: BASE },
+      body: frame,
+      signal: AbortSignal.timeout(10_000),
+    });
+    const sameBody = await same.json().catch(() => ({}));
+    assert(same.ok && sameBody.ok, `same-origin upload HTTP ${same.status}: ${sameBody.message || 'failed'}`);
+    assert(sameBody.source === 'live', `laptop frame source is ${sameBody.source}`);
+    assert(sameBody.jpegBytes > 100, 'laptop frame JPEG is suspiciously small');
+
+    const denied = await fetch(`${BASE}/api/laptop/frame?device=EVIL-CAM`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/jpeg', origin: 'http://evil.example' },
+      body: frame,
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert(denied.status === 403, `expected 403 for a cross-origin upload, got ${denied.status}`);
+    return `seq=${sameBody.seq}, jpeg=${sameBody.jpegBytes}B, cross-origin=403`;
+  });
+
   await test('POST /api/sensors accepts live telemetry', async () => {
     const response = await fetch(`${BASE}/api/sensors`, {
       method: 'POST',

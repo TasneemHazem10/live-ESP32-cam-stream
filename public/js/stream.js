@@ -62,6 +62,7 @@ export class LiveStream {
 
     // LiveKit / laptop camera state
     this.lkRoom = null;
+    this.lkPublisherRoom = null;
     this.lkVideo = null;
     this.lkRaf = null;
     this.lkLastPaint = 0;
@@ -69,6 +70,15 @@ export class LiveStream {
     this.lkReconnectTimer = null;
     this.localStream = null;
     this.localVideo = null;
+
+    // Laptop → relay JPEG publisher (lets every other device watch this webcam)
+    this.publishTimer = null;
+    this.publishCanvas = null;
+    this.publishCtx = null;
+    this.publishBusy = false;
+    this.publishStopped = true;
+    this.publishFailures = 0;
+    this.publishFrames = 0;
 
     this.decoding = false;
     this.pendingFrame = null;
@@ -115,6 +125,12 @@ export class LiveStream {
     this.setState('connecting');
 
     this.statsTimer = setInterval(() => this.reportStats(run), 1000);
+
+    // The camera belongs to this laptop, not to the selected transport. Keep
+    // publishing it in the background while the laptop previews another mode.
+    if (this.localStream && this.localVideo) {
+      this.startRelayPublisher(this.localVideo, run);
+    }
 
     if (mode === 'camera') {
       this.startLocalCamera(run).catch((error) => this.fail(error, run));
@@ -185,7 +201,9 @@ export class LiveStream {
       this.rtcPeerId = null;
     }
 
-    this.stopLiveKit();
+    // Keep the laptop camera sharing alive across viewer/transport switches;
+    // only the viewer connection and local preview pump are stopped here.
+    this.stopViewer();
 
     if (this.mjpegImg) {
       this.mjpegImg.onload = null;
@@ -584,11 +602,57 @@ export class LiveStream {
   /* Laptop camera + LiveKit                                            */
   /* ------------------------------------------------------------------ */
 
-  stopLiveKit() {
+  stopRelayPublisher() {
+    if (this.publishTimer) clearTimeout(this.publishTimer);
+    this.publishTimer = null;
+    this.publishBusy = false;
+    this.publishStopped = true;
+    this.publishFailures = 0;
+    if (this.publishCanvas) {
+      this.publishCanvas.width = 0;
+      this.publishCanvas.height = 0;
+    }
+    this.publishCanvas = null;
+    this.publishCtx = null;
+  }
+
+  /** Stop the viewer connection and the local render pump, not the camera. */
+  stopViewer() {
     if (this.lkRaf) cancelAnimationFrame(this.lkRaf);
     if (this.lkReconnectTimer) clearTimeout(this.lkReconnectTimer);
     this.lkRaf = null;
     this.lkReconnectTimer = null;
+
+    if (this.lkVideo) {
+      this.lkVideo.pause?.();
+      this.lkVideo.srcObject = null;
+      this.lkVideo.remove();
+    }
+    this.lkVideo = null;
+
+    if (this.lkRoom) {
+      try {
+        this.lkRoom.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.lkRoom = null;
+    this.lkLastPaint = 0;
+  }
+
+  /** Explicitly release the laptop camera and stop sharing it. */
+  stopCamera() {
+    this.stopRelayPublisher();
+
+    if (this.lkPublisherRoom) {
+      try {
+        this.lkPublisherRoom.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.lkPublisherRoom = null;
 
     if (this.localStream) {
       for (const track of this.localStream.getTracks()) {
@@ -607,23 +671,10 @@ export class LiveStream {
       this.localVideo.remove();
     }
     this.localVideo = null;
+  }
 
-    if (this.lkVideo) {
-      this.lkVideo.pause?.();
-      this.lkVideo.srcObject = null;
-      this.lkVideo.remove();
-    }
-    this.lkVideo = null;
-
-    if (this.lkRoom) {
-      try {
-        this.lkRoom.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
-    this.lkRoom = null;
-    this.lkLastPaint = 0;
+  get cameraActive() {
+    return Boolean(this.localStream);
   }
 
   handleLiveKitData(payload) {
@@ -761,8 +812,126 @@ export class LiveStream {
     }, 2200);
   }
 
+  /**
+   * Publish the laptop webcam to the relay as JPEG frames.
+   *
+   * The local preview already renders from the <video> element. This loop only
+   * exists so phones and other computers can watch the same camera through the
+   * relay transport they already use (WebSocket / MJPEG / polling / WebRTC).
+   * It is intentionally lightweight: ~5 fps at up to 640 px wide.
+   */
+  startRelayPublisher(video, run) {
+    this.stopRelayPublisher();
+    if (!this.started || run !== this.runId) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    this.publishCanvas = canvas;
+    this.publishCtx = ctx;
+    this.publishStopped = false;
+    this.publishFailures = 0;
+    this.publishFrames = 0;
+
+    const schedule = (delay) => {
+      if (!this.started || run !== this.runId || this.publishStopped) return;
+      this.publishTimer = setTimeout(tick, delay);
+    };
+
+    const tick = async () => {
+      if (!this.started || run !== this.runId || this.publishStopped) return;
+      if (this.publishBusy) {
+        schedule(80);
+        return;
+      }
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+        schedule(150);
+        return;
+      }
+
+      const maxWidth = 640;
+      const scale = Math.min(1, maxWidth / video.videoWidth);
+      const width = Math.max(2, Math.round(video.videoWidth * scale));
+      const height = Math.max(2, Math.round(video.videoHeight * scale));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      ctx.drawImage(video, 0, 0, width, height);
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.65));
+      if (!this.started || run !== this.runId || this.publishStopped) return;
+      if (!blob) {
+        schedule(250);
+        return;
+      }
+
+      this.publishBusy = true;
+      try {
+        const response = await fetch(
+          api(`/api/laptop/frame?device=LAPTOP-CAM&w=${width}&h=${height}`),
+          {
+            method: 'POST',
+            headers: { 'content-type': 'image/jpeg' },
+            body: blob,
+            cache: 'no-store',
+          },
+        );
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw Object.assign(
+            new Error(payload.message || `Relay rejected the frame (HTTP ${response.status})`),
+            { status: response.status },
+          );
+        }
+
+        this.publishFailures = 0;
+        this.publishFrames += 1;
+        schedule(200); // ~5 fps
+      } catch (error) {
+        if (!this.started || run !== this.runId || this.publishStopped) return;
+        this.publishFailures += 1;
+
+        // A rejected origin or a permanently missing route cannot recover;
+        // keep the local preview but stop hammering the relay.
+        const fatal = error.status === 403 || error.status === 404 || this.publishFailures >= 12;
+        if (this.publishFailures === 3 || (fatal && this.publishFailures > 3)) {
+          this.onError({
+            code: 'relay_publish_failed',
+            message: error.message,
+            mode: 'camera',
+            soft: !fatal,
+          });
+        }
+        if (fatal) {
+          this.publishStopped = true;
+          return;
+        }
+        schedule(Math.min(4000, 300 * 2 ** (this.publishFailures - 1)));
+      } finally {
+        this.publishBusy = false;
+      }
+    };
+
+    schedule(400);
+  }
+
   async startLocalCamera(run) {
     if (!this.started || run !== this.runId) return;
+
+    // Already sharing this laptop camera: only resume the local preview.
+    if (this.localStream && this.localVideo) {
+      this.lastSource = 'live';
+      await this.localVideo.play().catch(() => {});
+      this.startLiveKitPump(run, this.localVideo);
+      this.setState('connected');
+      return;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('This browser does not expose a camera (getUserMedia unavailable)');
     }
@@ -798,10 +967,14 @@ export class LiveStream {
 
     await video.play().catch(() => {});
     this.startLiveKitPump(run, video);
+
+    // Share this laptop camera with the relay so every other device on the
+    // network (and any remote viewer using WebSocket/MJPEG) sees the same feed.
+    this.startRelayPublisher(video, run);
     this.setState('connected');
 
-    // Local preview already works. Publishing to LiveKit is optional and only
-    // fails softly when the API secret has not been filled in yet.
+    // Local preview and LAN sharing already work. Publishing to LiveKit is
+    // optional and only fails softly when the API secret is missing.
     this.publishLocalCamera(media, run).catch((error) => {
       this.onError({
         code: 'livekit_publish_failed',
@@ -822,14 +995,23 @@ export class LiveStream {
 
     const info = await fetchLiveKitToken('publisher', 'camera-');
     const room = new LivekitClient.Room({ adaptiveStream: false, dynacast: false });
-    this.lkRoom = room;
+    // Keep the publisher room separate from the viewer room so switching the
+    // laptop to LiveKit viewer mode never disconnects the shared camera.
+    if (this.lkPublisherRoom) {
+      try {
+        this.lkPublisherRoom.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.lkPublisherRoom = room;
 
     room.on(LivekitClient.RoomEvent.DataReceived, (payload) => {
-      if (run !== this.runId) return;
+      if (!this.started) return;
       this.handleLiveKitData(payload);
     });
     room.on(LivekitClient.RoomEvent.Disconnected, () => {
-      if (run === this.runId && this.started) this.setState('reconnecting');
+      if (this.started) this.setState('reconnecting');
     });
 
     await room.connect(info.url, info.token, { autoSubscribe: false });

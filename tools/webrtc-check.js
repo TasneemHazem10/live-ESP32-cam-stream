@@ -11,10 +11,52 @@
  * valid JPEG.
  */
 
+import jpeg from 'jpeg-js';
 import { RTCPeerConnection } from 'werift';
 
 const BASE = (process.env.SERVER_URL || process.argv[2] || 'http://localhost:3000').replace(/\/+$/, '');
+const TOKEN = process.env.UPLOAD_TOKEN || '';
 const startedAt = Date.now();
+
+function authHeaders(extra = {}) {
+  return TOKEN ? { ...extra, 'x-upload-token': TOKEN } : extra;
+}
+
+/** A tiny deterministic JPEG so the check does not need a real camera. */
+function testJpeg(width = 64, height = 48) {
+  const data = Buffer.allocUnsafe(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      data[i] = Math.round((x / width) * 255);
+      data[i + 1] = Math.round((y / height) * 255);
+      data[i + 2] = 180;
+      data[i + 3] = 255;
+    }
+  }
+  return jpeg.encode({ data, width, height }, 70).data;
+}
+
+/** Keep the relay fed while the check waits for a second WebRTC frame. */
+function startFramePump() {
+  const frame = testJpeg();
+  let stopped = false;
+  const tick = () => {
+    if (stopped) return;
+    fetch(`${BASE}/api/laptop/frame?device=WEBRTC-TEST&w=64&h=48`, {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'image/jpeg' }),
+      body: frame,
+      signal: AbortSignal.timeout(4000),
+    }).catch(() => {});
+  };
+  tick();
+  const timer = setInterval(tick, 200);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
 
 const green = (text) => `\x1b[32m${text}\x1b[0m`;
 const red = (text) => `\x1b[31m${text}\x1b[0m`;
@@ -70,6 +112,7 @@ async function main() {
   let binaryFrames = 0;
   let textMessages = 0;
   let firstFrame = null;
+  let stopPump = null;
 
   const framePromise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timed out waiting for a binary camera frame')), 20_000);
@@ -137,6 +180,10 @@ async function main() {
     await openPromise;
     console.log(`  ${green('PASS')}  Data channel "${channel.label}" opened`);
 
+    // Feed the relay from this process: the real deployment gets frames from
+    // the laptop webcam, but the check must also pass on a headless machine.
+    stopPump = startFramePump();
+
     const frame = await framePromise;
     const seq = frame.readUInt32BE(0);
     const timestamp = frame.readDoubleBE(4);
@@ -179,6 +226,7 @@ async function main() {
       `  ${green(`✔ WebRTC data channel verified in ${Date.now() - startedAt}ms`)}${hasTurn ? '' : dim(' (STUN mode)')}\n`,
     );
   } finally {
+    stopPump?.();
     try {
       channel.close();
     } catch {

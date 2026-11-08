@@ -70,9 +70,13 @@ Open:
 http://localhost:3000
 ```
 
-The dashboard starts in **live-only mode**: it shows a waiting panel until the ESP32-CAM sends
-its first frame. There is no synthetic video by default. To preview the UI without hardware,
+The dashboard starts in **laptop-camera mode**: the relay laptop opens its webcam automatically
+(allow the browser prompt) and relays the JPEG stream to every viewer. The first ESP32-CAM frame
+can replace it later. There is no synthetic video by default; to preview the UI without hardware,
 set `DEMO_FALLBACK=true` in `.env` and restart the server.
+
+Other devices on the same Wi-Fi open `http://LAPTOP-LAN-IP:3000` and watch the relay stream as
+viewers. They never ask for camera access and the camera buttons stay hidden.
 
 Try:
 
@@ -87,7 +91,7 @@ Useful commands:
 npm run dev          # restart automatically on file changes
 npm run sim:camera   # POST synthetic RGB565 frames
 npm run sim:sensors  # POST synthetic sensor packets
-npm run test:e2e     # 12 HTTP/WebSocket/MJPEG/sensor checks
+npm run test:e2e     # 13 HTTP/WebSocket/MJPEG/sensor checks
 npm run test:webrtc  # real offer/answer + data-channel frame check
 npm run test:ui      # headless Chrome UI test
 ```

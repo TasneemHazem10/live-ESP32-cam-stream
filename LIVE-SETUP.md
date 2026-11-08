@@ -11,12 +11,16 @@ laptop and LiveKit Cloud carries the video to remote viewers.
 
 ## What works right now (no hardware yet)
 
-- The dashboard opens the **laptop camera** automatically. Allow the browser permission prompt.
+- The **relay laptop** opens the camera automatically. Allow the browser permission prompt once.
 - All eight vision effects, mirror, grid, snapshot and the effect tour work on the webcam feed.
+- Every other device is a **viewer**: it opens the dashboard and watches the same stream. It never
+  asks for camera access and the camera buttons are hidden.
+- On the same Wi-Fi, viewers watch through the relay (`http://LAPTOP-LAN-IP:3000`) using
+  WebSocket, MJPEG, HTTP or WebRTC — no LiveKit account needed.
 - The **sensor cards update every two seconds** from the built-in live simulator and show a `SIM`
   badge. The first real ESP32 packet switches them to `LIVE` permanently.
-- **LiveKit Cloud** publishes the laptop camera to remote viewers; the same room also carries
-  sensor packets.
+- **LiveKit Cloud** is optional and carries the laptop camera to viewers outside the LAN; the same
+  room also carries sensor packets.
 
 The camera and sensor boards only make **outbound requests** to the laptop. You do **not** need a
 public IP or router changes while they are on the same Wi-Fi.
@@ -87,14 +91,18 @@ Restart the relay after every `.env` change.
 
 ### Publishing and viewing
 
-- **Publisher (laptop):** open the dashboard and click **Laptop camera**. The webcam is shown in
-  the canvas *and* published to the LiveKit room.
-- **Viewer (phone / another city):** open the dashboard, click **LiveKit**, and the remote track
-  appears in the same canvas with all effects. Sensor packets arrive on the room data channel.
+- **Publisher (relay laptop only):** open <http://localhost:3000> and allow the camera prompt. The
+  webcam appears in the canvas and is relayed to every viewer; keep this tab open. Switching the
+  laptop's own preview to WebSocket/WebRTC/MJPEG does not stop the camera sharing.
+- **Viewer on the same Wi-Fi:** open `http://LAPTOP-LAN-IP:3000` (for example
+  `http://192.168.1.50:3000`). The dashboard plays the relay stream by default and never asks for
+  camera access. Pick WebSocket, MJPEG or HTTP for the lowest-friction path.
+- **Viewer outside the LAN:** open the dashboard and click **LiveKit**. The laptop's camera track
+  appears in the same canvas with all effects, and sensor packets arrive on the room data channel.
 
 The API secret stays on the laptop; browsers only receive short-lived join tokens from
-`/api/livekit/token`. If the secret is missing, the laptop camera still works locally and the
-LiveKit mode shows a clear “not configured” message.
+`/api/livekit/token`. If the secret is missing, the laptop camera still works locally and on the
+LAN, and the LiveKit mode shows a clear “not configured” message.
 
 > LiveKit’s free tier is enough for a demo. No card is required to create the project.
 
@@ -117,9 +125,11 @@ http://192.168.1.50:3000/api/status
 
 If Windows Firewall blocks it, allow Node.js on **Private networks** when prompted.
 
-> Browsers only allow `getUserMedia` on `localhost` or HTTPS. A phone opening
-> `http://192.168.1.50:3000` can view via **LiveKit** mode but cannot use its own camera until the
-> relay is behind HTTPS (for example Cloudflare Tunnel or ngrok).
+> Browsers only allow `getUserMedia` on `localhost` or HTTPS. That is fine here: only the relay
+> laptop opens the camera. A phone opening `http://192.168.1.50:3000` is a viewer and watches the
+> relay stream (WebSocket/MJPEG/HTTP) without any camera prompt. Use LiveKit for viewing outside
+> the LAN, or put the relay behind HTTPS (for example Cloudflare Tunnel or ngrok) if you later want
+> camera features on other devices.
 
 ---
 
@@ -328,10 +338,10 @@ without it, and camera uploads never need TURN.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Laptop camera does not start | Browser blocked it | Allow camera permission; open `localhost` or HTTPS |
-| `getUserMedia is not defined` on a phone | LAN IP is not a secure context | Use **LiveKit** mode on the phone, or add an HTTPS tunnel |
+| Laptop camera does not start | Browser blocked it | Allow camera permission on the relay laptop; use `localhost` or HTTPS there |
+| `getUserMedia is not defined` on a phone | Phone is a viewer and should not open a camera | Nothing to fix: watch the relay stream. Use **LiveKit** for viewing outside the LAN |
 | LiveKit mode says “not configured” | Secret missing/placeholder | Paste the real secret from LiveKit **Settings → Keys**, restart |
-| Remote viewer stays black | No publisher yet | Click **Laptop camera** on the publishing device first |
+| Remote viewer stays black | Laptop is not publishing | Keep the laptop dashboard open with camera allowed; check `/api/livekit/config` reports `enabled: true` |
 | Dashboard stays `OFF` after flashing | Camera cannot reach the relay | Use the laptop LAN IP, confirm `http://IP:3000/healthz`, check token |
 | Serial `Upload problem: 401` | Token mismatch | Copy `UPLOAD_TOKEN` from `.env` into the sketch (both `X-Upload-Token` and `X-Api-Key` are accepted) |
 | Serial `400 Expected 153600 bytes` | Old sketch / wrong format | Flash the updated sketch; it sends `w=320&h=240&format=rgb565be` |

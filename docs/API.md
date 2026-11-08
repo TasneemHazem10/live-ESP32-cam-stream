@@ -72,6 +72,30 @@ Errors:
 | `401` | `invalid_token` | Token missing or wrong |
 | `413` | `payload_too_large` | Body exceeds `MAX_FRAME_BYTES` |
 
+### `POST /api/laptop/frame`
+
+The relay laptop's dashboard compresses its own webcam to JPEG and posts it here so every other
+device can watch the same stream. This route **does not require `UPLOAD_TOKEN`**; instead it only
+accepts **same-origin** browser requests. A request whose `Origin` header does not match the
+request `Host` is rejected with `403 forbidden_origin`.
+
+Query parameters are the same as `/api/upload-frame` (`w`, `h`, `device`, …). The body is a
+complete JPEG; RGB565 is also accepted but browsers always send JPEG.
+
+```bash
+curl -X POST "http://localhost:3000/api/laptop/frame?device=LAPTOP-CAM&w=640&h=480" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @webcam.jpg
+```
+
+Response is identical to `/api/upload-frame`. Frames posted here are normal live frames: they fan
+out through `/ws/frames`, `/stream.mjpeg`, `/api/frame.jpg` and WebRTC, and set `source: "live"`.
+
+| Status | `error` | Meaning |
+| --- | --- | --- |
+| `403` | `forbidden_origin` | The `Origin` header does not match the dashboard host |
+| `400` | `frame_rejected` | Body is not a valid JPEG |
+
 ### `GET /api/frame.jpg`
 
 Returns the newest frame. Headers: `X-Frame-Seq`, `X-Frame-Time`, `X-Frame-Source`.
@@ -375,6 +399,7 @@ into the room data channel with topic `sensors` as
 ```json
 {
   "ok": true,
+  "local": true,
   "serverTime": 1780000000000,
   "uptimeSec": 3600,
   "camera": {
@@ -427,6 +452,7 @@ into the room data channel with topic `sensors` as
   },
   "endpoints": {
     "upload": "/api/upload-frame",
+    "laptopFrame": "/api/laptop/frame",
     "frame": "/api/frame.jpg",
     "mjpeg": "/stream.mjpeg",
     "wsFrames": "/ws/frames",
@@ -437,6 +463,12 @@ into the room data channel with topic `sensors` as
   }
 }
 ```
+
+`local` is `true` only when the request comes from the relay machine itself (loopback or one of
+its own interface addresses). The dashboard uses it to decide the role: `true` means this browser
+may open the webcam and publish; `false` means a viewer that must never call `getUserMedia`.
+Because the check uses the source address, the laptop still gets `local: true` when it opens its
+own dashboard through its LAN IP.
 
 ### `GET /healthz`
 
