@@ -493,6 +493,7 @@ that talks to a relay exposed through a tunnel:
 | Sensors show `--` | No packet yet | Confirm `/api/sensors` URL and JSON body; check `/api/sensors/devices` |
 | Every visitor is asked for camera access | Everyone is being classified as the laptop, usually because a tunnel/proxy forwards from `127.0.0.1` | Update to this build, hard-refresh, and open the laptop at `http://localhost:3000`; public tunnel hosts are now watch-only |
 | Laptop camera does not start | Browser blocked the camera, or the dashboard is open on a viewer device | Allow camera permission on the relay laptop; only the laptop should show the camera buttons. LAN viewers use the relay stream, not their own camera |
+| Phone shows a frozen or very slow image | The laptop tab is hidden and an older build used throttled `setTimeout` to publish | Update and reload the laptop page once. This build publishes from a background worker, so the tab can be hidden or minimized while it shares the camera |
 | LiveKit mode says "not configured" | `LIVEKIT_API_SECRET` is missing or still a placeholder | Paste the real secret from LiveKit **Settings → Keys**, restart the relay |
 | Remote viewer stays black | No publisher in the room, or the secret is invalid | Keep the laptop dashboard open (it publishes the webcam); check `/api/livekit/config` reports `enabled: true` |
 | UI test cannot find Chrome | No system Chrome/Edge | Set `CHROME_PATH` to the executable |

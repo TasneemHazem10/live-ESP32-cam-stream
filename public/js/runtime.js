@@ -1,10 +1,5 @@
 const params = new URLSearchParams(window.location.search);
-const meta = document.querySelector('meta[name="mirsad-api-base"]');
-const configured =
-  params.get('api') ||
-  window.MIRSAD_API_BASE ||
-  (meta && meta.content) ||
-  '';
+const configured = params.get('api') || window.API_BASE || '';
 
 export const API_BASE = String(configured).replace(/\/+$/, '');
 

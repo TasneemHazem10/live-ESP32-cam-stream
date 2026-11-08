@@ -12,8 +12,8 @@ const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit', 'camera'];
-const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT', camera: 'CAMERA' };
+const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit'];
+const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT' };
 const SENSOR_STALE_MS = 12_000;
 
 // Only the machine that runs the relay (opened as localhost) owns the camera.
@@ -136,6 +136,7 @@ const dom = {
   sensorChart: $('sensor-chart'),
   sensorDevice: $('sensor-device'),
   sensorUpdated: $('sensor-updated'),
+  floatTemp: $('float-temp'),
   sensorGrid: $('sensor-grid'),
   toastStack: $('toast-stack'),
   serverPill: $('server-pill'),
@@ -222,7 +223,7 @@ function renderFrame(source, meta = {}) {
       applyEffect(state.effect, srcImageData, dstImageData, state.intensity);
       filterCtx.putImageData(dstImageData, 0, 0);
     } catch (error) {
-      console.warn('[mirsad] effect failed, painting raw frame:', error);
+      console.warn('[fx] effect failed, painting raw frame:', error);
     }
   }
 
@@ -549,17 +550,16 @@ function startMode(mode, { announce = true } = {}) {
 
   if (announce) {
     if (mode === 'webrtc') showToast(t('toast.webrtcStart'), 'info');
-    else if (mode === 'camera') showToast(t('toast.cameraStart'), 'info', 3600);
     else if (mode === 'livekit') showToast(t('toast.livekitStart'), 'info');
     else showToast(t('toast.mode', { mode: t(`mode.${mode}`) }), 'info', 2600);
   }
 }
 
 function updateCameraControls() {
-  const show = relayRole === 'laptop' && isLocalOrigin();
+  // Camera mode is removed — the live source is the ESP32-CAM only.
   for (const id of ['local-camera-btn', 'wait-camera-btn']) {
     const button = $(id);
-    if (button) button.hidden = !show;
+    if (button) button.hidden = true;
   }
 }
 
@@ -813,6 +813,16 @@ function applySensorRecord(record, { seed = false } = {}) {
 
   updateSensorPill();
   updateSensorUpdated();
+
+  // Live temperature for hero float chip — only real sensor values, never fixed.
+  if (dom.floatTemp) {
+    const temp = Number(readings.temperature);
+    if (Number.isFinite(temp)) {
+      dom.floatTemp.textContent = `${temp.toFixed(1)}°C`;
+    } else {
+      dom.floatTemp.textContent = t('hero.float2');
+    }
+  }
 }
 
 function seedSensorHistory(points = []) {
@@ -1004,11 +1014,6 @@ async function refreshStatus() {
     relayRoleLocked = true;
     relayRole = status.local && isLocalOrigin() ? 'laptop' : 'viewer';
     updateCameraControls();
-    // The laptop may have opened the dashboard through its LAN IP; start
-    // sharing the camera now that the server confirmed it is the local host.
-    if (relayRole === 'laptop' && state.mode === 'ws' && !stream.cameraActive) {
-      startMode('camera', { announce: false });
-    }
   }
 
   const camera = status.camera || {};
@@ -1104,11 +1109,6 @@ function setupStageControls() {
     setIntensity(event.target.value);
   });
 
-  $('wait-camera-btn')?.addEventListener('click', () => {
-    if (relayRole !== 'laptop' || !isLocalOrigin()) return;
-    startMode('camera');
-  });
-
   dom.tourBtn?.addEventListener('click', startTour);
 
   dom.mirrorBtn?.addEventListener('click', () => {
@@ -1140,7 +1140,7 @@ function setupStageControls() {
       const link = document.createElement('a');
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       link.href = url;
-      link.download = `mirsad-${state.effect}-${stamp}.png`;
+      link.download = `stream-${state.effect}-${stamp}.png`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1298,6 +1298,36 @@ function setupTilt() {
   });
 }
 
+function setupStars() {
+  const field = document.querySelector('.starfield');
+  if (!field) return;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const count = reduced ? 60 : 180;
+  const width = field.clientWidth || window.innerWidth;
+  const height = field.clientHeight || window.innerHeight;
+
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < count; i++) {
+    const star = document.createElement('span');
+    star.className = 'star' + (reduced ? '' : ' twinkle');
+    const size = Math.random() * 2 + 0.5;
+    const x = Math.random() * width;
+    const y = Math.random() * height;
+    const opacity = Math.random() * 0.7 + 0.15;
+    star.style.width = size + 'px';
+    star.style.height = size + 'px';
+    star.style.left = x + 'px';
+    star.style.top = y + 'px';
+    star.style.opacity = opacity;
+    if (!reduced) {
+      star.style.setProperty('--dur', (2 + Math.random() * 5) + 's');
+      star.style.animationDelay = (Math.random() * 5) + 's';
+    }
+    frag.appendChild(star);
+  }
+  field.appendChild(frag);
+}
+
 function setupClocks() {
   const update = () => {
     const now = new Date();
@@ -1380,6 +1410,7 @@ setupNavigation();
 setupScrollEffects();
 setupReveal();
 setupTilt();
+setupStars();
 setupClocks();
 setupEndpoint();
 applySource('none');
@@ -1389,9 +1420,10 @@ updateCameraControls();
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
-// The relay laptop publishes its webcam automatically; every other device
-// starts as a viewer of that same stream and never prompts for a camera.
-startMode(relayRole === 'laptop' ? 'camera' : 'ws', { announce: false });
+// The ESP32-CAM pushes frames to /api/upload-frame; the dashboard receives
+// them via WebSocket (or MJPEG/HTTP polling). We no longer open the laptop
+// webcam — the live source is the ESP32-CAM hardware.
+startMode('ws', { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
 // waiting panel instead of leaving a frozen frame on screen.

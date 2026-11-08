@@ -4,9 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#05060f" />
-    <meta name="description" content="LIVE ESP32-CAM — live streaming, browser vision filters and ESP32 sensor telemetry on one dashboard." />
-    <meta name="mirsad-api-base" content="" />
-    <title>LIVE ESP32-CAM — بث مباشر ومستشعرات حية</title>
+    <meta name="description" content="Live streaming, vision filters and sensor telemetry dashboard." />
+    <title>LIVE STREAM — بث مباشر</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,19 +20,22 @@
     <div class="scroll-progress" aria-hidden="true"><span id="progress-bar"></span></div>
 
     <div class="bg-layer" aria-hidden="true">
-      <span class="orb orb-a"></span>
-      <span class="orb orb-b"></span>
-      <span class="orb orb-c"></span>
-      <span class="bg-grid"></span>
-      <span class="bg-noise"></span>
+      <div class="starfield" aria-hidden="true"></div>
+      <div class="nebula nebula-a" aria-hidden="true"></div>
+      <div class="nebula nebula-b" aria-hidden="true"></div>
+      <div class="nebula nebula-c" aria-hidden="true"></div>
+      <div class="shooting-star" aria-hidden="true"></div>
+      <div class="shooting-star" aria-hidden="true"></div>
+      <div class="shooting-star" aria-hidden="true"></div>
+      <div class="shooting-star" aria-hidden="true"></div>
     </div>
 
     <header class="site-header" id="site-header">
       <div class="container header-inner">
-        <a class="brand" href="#top" aria-label="LIVE ESP32-CAM">
+        <a class="brand" href="#top" aria-label="LIVE STREAM">
           <span class="brand-mark"><svg class="icon"><use href="#i-eye"></use></svg></span>
           <span class="brand-text">
-            <strong>LIVE ESP32-CAM</strong>
+            <strong>LIVE STREAM</strong>
             <small data-i18n="brand.sub">بث مباشر</small>
           </span>
         </a>
@@ -66,14 +68,18 @@
       <section class="hero" id="top">
         <div class="container hero-grid">
           <div class="hero-copy">
-            <span class="eyebrow reveal"><span class="pulse-dot"></span><span data-i18n="hero.eyebrow">منصة إنترنت الأشياء المتكاملة</span></span>
-            <h1 class="reveal" style="--i: 1" data-i18n-html="hero.title">
+            <div class="live-badge reveal" style="--i: 0">
+              <span class="live-dot"></span>
+              <span data-i18n="hero.live">LIVE STREAM</span>
+            </div>
+            <span class="eyebrow reveal" style="--i: 1"><span class="pulse-dot"></span><span data-i18n="hero.eyebrow">منصة إنترنت الأشياء المتكاملة</span></span>
+            <h1 class="reveal" style="--i: 2" data-i18n-html="hero.title">
               شاهد الميدان،<br /><span class="grad">واقرأ ما لا يُرى.</span>
             </h1>
-            <p class="hero-sub reveal" style="--i: 2" data-i18n="hero.sub">
+            <p class="hero-sub reveal" style="--i: 3" data-i18n="hero.sub">
               بث مباشر من ESP32-CAM، تحليل بصري فوري، وقراءات مستشعرات حية من ESP32 — كل ذلك في لوحة واحدة تعمل من أي متصفح.
             </p>
-            <div class="hero-actions reveal" style="--i: 3">
+            <div class="hero-actions reveal" style="--i: 4">
               <a class="btn btn-primary" href="#studio">
                 <svg class="icon"><use href="#i-play"></use></svg>
                 <span data-i18n="hero.cta1">افتح البث المباشر</span>
@@ -83,7 +89,7 @@
                 <span data-i18n="hero.cta2">استكشف المستشعرات</span>
               </a>
             </div>
-            <div class="hero-badges reveal" style="--i: 4">
+            <div class="hero-badges reveal" style="--i: 5">
               <span class="chip"><svg class="icon"><use href="#i-expand"></use></svg><span data-i18n="hero.badge1">دقة 320×240</span></span>
               <span class="chip"><svg class="icon"><use href="#i-activity"></use></svg><span data-i18n="hero.badge2">حتى 15 إطار/ث</span></span>
               <span class="chip"><svg class="icon"><use href="#i-globe"></use></svg><span data-i18n="hero.badge3">WebRTC + TURN</span></span>
@@ -98,7 +104,7 @@
 
             <div class="preview-card tilt">
               <div class="preview-head">
-                <span class="preview-title"><span class="dot"></span><span data-i18n="hero.cardTitle">LIVE ESP32-CAM</span></span>
+                <span class="preview-title"><span class="dot"></span><span data-i18n="hero.cardTitle">LIVE STREAM</span></span>
                 <span class="preview-time" id="hero-clock">--:--</span>
               </div>
               <div class="preview-stage">
@@ -118,7 +124,7 @@
             </div>
 
             <div class="float-chip float-a"><svg class="icon"><use href="#i-droplet"></use></svg><span data-i18n="hero.float1">مؤشر الماء</span></div>
-            <div class="float-chip float-b"><svg class="icon"><use href="#i-thermometer"></use></svg><span data-i18n="hero.float2">حرارة 26.4°</span></div>
+            <div class="float-chip float-b"><svg class="icon"><use href="#i-thermometer"></use></svg><span id="float-temp" data-i18n="hero.float2">بانتظار القراءات</span></div>
             <div class="float-chip float-c"><svg class="icon"><use href="#i-globe"></use></svg><span data-i18n="hero.float3">TURN جاهز</span></div>
           </div>
         </div>
@@ -231,11 +237,7 @@
                 <div class="video-wait" id="video-wait">
                   <div class="wait-rings"><span></span><span></span><span></span></div>
                   <strong data-i18n="studio.waitTitle">بانتظار إشارة الكاميرا</strong>
-                  <p data-i18n="studio.waitSub">الخادم جاهز. على اللابتوب اضغط «مشاركة كاميرا اللابتوب» — بقية الأجهزة ستعرض نفس البث تلقائيًا.</p>
-                  <button class="btn btn-primary small wait-camera" id="wait-camera-btn" type="button">
-                    <svg class="icon"><use href="#i-camera"></use></svg>
-                    <span data-i18n="studio.startCamera">مشاركة كاميرا اللابتوب</span>
-                  </button>
+                  <p data-i18n="studio.waitSub">الخادم جاهز. شغّل لوحة ESP32-CAM ستبدأ الإطارات بالوصول تلقائيًا — لا حاجة ل.ip عام.</p>
                   <code>POST /api/upload-frame</code>
                 </div>
 
@@ -254,10 +256,6 @@
                     <button class="mode-btn" data-mode="livekit" type="button">LiveKit</button>
                   </div>
                   <div class="icon-actions">
-                    <button class="mode-btn camera-btn" id="local-camera-btn" data-mode="camera" type="button" data-i18n-title="studio.myCamera" title="Share laptop camera" aria-label="Share laptop camera">
-                      <svg class="icon"><use href="#i-camera"></use></svg>
-                      <span data-i18n="studio.myCamera">Share laptop camera</span>
-                    </button>
                     <button class="icon-btn" id="snapshot-btn" type="button" data-i18n-title="studio.snapshot" title="Snapshot" aria-label="Snapshot">
                       <svg class="icon"><use href="#i-snapshot"></use></svg>
                     </button>
@@ -482,10 +480,9 @@
     <footer class="site-footer">
       <div class="container footer-grid">
         <div class="footer-brand">
-          <a class="brand" href="#top" aria-label="LIVE ESP32-CAM">
+          <a class="brand" href="#top" aria-label="LIVE STREAM">
             <span class="brand-mark"><svg class="icon"><use href="#i-eye"></use></svg></span>
-            <span class="brand-text"><strong>LIVE ESP32-CAM</strong><small data-i18n="brand.sub">بث مباشر</small></span>
-          </a>
+            <span class="brand-text"><strong>LIVE STREAM</strong><small data-i18n="brand.sub">بث مباشر</small></span></a>
           <p data-i18n="footer.tagline">رؤية ذكية. بيانات حية. قرار أسرع.</p>
           <div class="footer-tech">
             <span>Node.js</span><span>Render</span><span>Metered</span><span>ESP32</span>
@@ -515,7 +512,7 @@
         </div>
       </div>
       <div class="container footer-bottom">
-        <span>© <span id="year">2026</span> LIVE ESP32-CAM. <span data-i18n="footer.rights">جميع الحقوق محفوظة.</span></span>
+        <span>© <span id="year">2026</span> LIVE STREAM. <span data-i18n="footer.rights">جميع الحقوق محفوظة.</span></span>
         <span data-i18n="footer.built">مبني على Node.js · Render · Metered</span>
       </div>
     </footer>

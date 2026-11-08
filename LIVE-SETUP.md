@@ -92,7 +92,8 @@ Restart the relay after every `.env` change.
 ### Publishing and viewing
 
 - **Publisher (relay laptop only):** open <http://localhost:3000> and allow the camera prompt. The
-  webcam appears in the canvas and is relayed to every viewer; keep this tab open. Switching the
+  webcam appears in the canvas and is relayed to every viewer; keep this tab open (it can be hidden
+  or minimized — this build publishes from a background worker, not a throttled timer). Switching the
   laptop's own preview to WebSocket/WebRTC/MJPEG does not stop the camera sharing.
 - **Viewer on the same Wi-Fi:** open `http://LAPTOP-LAN-IP:3000` (for example
   `http://192.168.1.50:3000`). The dashboard plays the relay stream by default and never asks for

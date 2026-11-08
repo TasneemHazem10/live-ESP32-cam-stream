@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'mirsad.lang';
+const STORAGE_KEY = 'lang';
 
 const messages = {
   ar: {
@@ -22,6 +22,7 @@ const messages = {
     'status.disconnected': 'منقطع',
     'status.serverOnline': 'الخادم متصل',
     'hero.eyebrow': 'منصة إنترنت الأشياء المتكاملة',
+    'hero.live': 'مباشر',
     'hero.title': 'شاهد الميدان،<br><span class="grad">واقرأ ما لا يُرى.</span>',
     'hero.sub':
       'بث مباشر من ESP32-CAM، تحليل بصري فوري، وقراءات مستشعرات حية من ESP32 — كل ذلك في لوحة واحدة تعمل من أي متصفح.',
@@ -34,7 +35,7 @@ const messages = {
     'hero.cardTitle': 'LIVE ESP32-CAM',
     'hero.previewNote': 'محاكي الإشارة يعمل الآن — اربط الكاميرا للبث الحقيقي.',
     'hero.float1': 'مؤشر الماء',
-    'hero.float2': 'حرارة 26.4°',
+    'hero.float2': 'بانتظار القراءات',
     'hero.float3': 'TURN جاهز',
     'stats.fps': 'الإطارات / ث',
     'stats.latency': 'التأخير',
@@ -57,9 +58,9 @@ const messages = {
     'studio.model': 'RHYX-M21-45 · 320×240',
     'studio.rec': 'REC',
     'studio.waitTitle': 'بانتظار إشارة الكاميرا',
-    'studio.waitSub': 'الخادم جاهز. على اللابتوب اضغط «مشاركة كاميرا اللابتوب» — بقية الأجهزة ستعرض نفس البث تلقائيًا.',
-    'studio.myCamera': 'مشاركة كاميرا اللابتوب',
-    'studio.startCamera': 'مشاركة كاميرا اللابتوب',
+    'studio.waitSub': 'الخادم جاهز. شغّل لوحة ESP32-CAM ستبدأ الإطارات بالوصول تلقائيًا — لا حاجة لـ IP عام.',
+    'studio.myCamera': 'ESP32-CAM',
+    'studio.startCamera': 'ESP32-CAM',
     'studio.effects': 'تأثيرات الرؤية',
     'studio.effectsSub': 'ثمانية مرشحات تعمل داخل المتصفح',
     'studio.tour': 'جولة تلقائية',
@@ -79,7 +80,6 @@ const messages = {
     'mode.mjpeg': 'MJPEG',
     'mode.poll': 'HTTP',
     'mode.livekit': 'LiveKit',
-    'mode.camera': 'كاميرا اللابتوب',
     'mode.ws.note': 'توازن مثالي بين التأخير والتوافق',
     'mode.webrtc.note': 'قناة بيانات WebRTC عبر Metered TURN',
     'mode.mjpeg.note': 'توافق واسع مع كل المتصفحات',
@@ -225,6 +225,7 @@ const messages = {
     'status.disconnected': 'Disconnected',
     'status.serverOnline': 'Server online',
     'hero.eyebrow': 'The integrated IoT platform',
+    'hero.live': 'LIVE STREAM',
     'hero.title': 'See the field.<br><span class="grad">Read what hides.</span>',
     'hero.sub':
       'A live ESP32-CAM feed, real-time vision filters, and sensor telemetry from ESP32 — one dashboard, any browser.',
@@ -237,7 +238,7 @@ const messages = {
     'hero.cardTitle': 'LIVE ESP32-CAM',
     'hero.previewNote': 'The demo signal is live — connect the camera for the real feed.',
     'hero.float1': 'Water index',
-    'hero.float2': '26.4° temp',
+    'hero.float2': 'Waiting for readings',
     'hero.float3': 'TURN ready',
     'stats.fps': 'Frames / sec',
     'stats.latency': 'Latency',
@@ -260,9 +261,9 @@ const messages = {
     'studio.model': 'RHYX-M21-45 · 320×240',
     'studio.rec': 'REC',
     'studio.waitTitle': 'Waiting for the camera signal',
-    'studio.waitSub': 'The relay is ready. On the laptop, press “Share laptop camera” — every other device will watch the same stream automatically.',
-    'studio.myCamera': 'Share laptop camera',
-    'studio.startCamera': 'Share laptop camera',
+    'studio.waitSub': 'The relay is ready. Power on the ESP32-CAM — frames will arrive automatically. No public IP needed.',
+    'studio.myCamera': 'ESP32-CAM',
+    'studio.startCamera': 'ESP32-CAM',
     'studio.effects': 'Vision effects',
     'studio.effectsSub': 'Eight filters rendered in your browser',
     'studio.tour': 'Auto tour',
@@ -282,7 +283,6 @@ const messages = {
     'mode.mjpeg': 'MJPEG',
     'mode.poll': 'HTTP',
     'mode.livekit': 'LiveKit',
-    'mode.camera': 'Laptop camera',
     'mode.ws.note': 'Best balance of latency and compatibility',
     'mode.webrtc.note': 'WebRTC data channel over Metered TURN',
     'mode.mjpeg.note': 'Widest browser compatibility',

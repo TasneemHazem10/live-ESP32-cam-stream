@@ -1,8 +1,84 @@
-﻿import { api, wsUrl } from './runtime.js';
+﻿import { absoluteUrl, api, wsUrl } from './runtime.js';
 
 const WS_MAX_RECONNECTS = 5;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Browsers throttle setTimeout/setInterval in hidden tabs down to ~1 frame per
+// second (and ~1 per minute after a while). That makes the phone's view freeze
+// whenever the laptop tab is in the background. This worker is driven by the
+// camera track itself (via MediaStreamTrackProcessor) instead of a timer, so
+// the relay keeps receiving a smooth stream while the laptop tab is hidden.
+const PUBLISH_WORKER_SOURCE = `
+let canvas = null;
+let ctx = null;
+let lastSent = 0;
+let stopped = false;
+
+async function pump(data) {
+  const { readable, endpoint, device, maxWidth, quality, interval } = data;
+  const reader = readable.getReader();
+  try {
+    for (;;) {
+      const { value: frame, done } = await reader.read();
+      if (done || stopped) break;
+      if (!frame) continue;
+      try {
+        const vw = frame.displayWidth || frame.width || 0;
+        const vh = frame.displayHeight || frame.height || 0;
+        const now = performance.now();
+        // Throttle uploads to the requested interval but always drain frames
+        // so the track never backs up.
+        if (!vw || !vh || now - lastSent < interval) {
+          frame.close();
+          continue;
+        }
+        const scale = Math.min(1, maxWidth / vw);
+        const w = Math.max(2, Math.round(vw * scale));
+        const h = Math.max(2, Math.round(vh * scale));
+        if (!canvas) {
+          canvas = new OffscreenCanvas(w, h);
+          ctx = canvas.getContext('2d', { alpha: false });
+        }
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        ctx.drawImage(frame, 0, 0, w, h);
+        frame.close();
+        const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+        if (!blob) continue;
+        lastSent = performance.now();
+        const res = await fetch(
+          endpoint + '?device=' + encodeURIComponent(device) + '&w=' + w + '&h=' + h,
+          { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob, cache: 'no-store' },
+        );
+        if (res.ok) {
+          postMessage({ type: 'frame' });
+        } else {
+          const payload = await res.json().catch(() => ({}));
+          postMessage({ type: 'error', status: res.status, message: payload.message || 'HTTP ' + res.status });
+          if (res.status === 403 || res.status === 404) break;
+        }
+      } catch (error) {
+        try { frame.close(); } catch (e) {}
+        postMessage({ type: 'error', message: String((error && error.message) || error) });
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch (e) {}
+  }
+}
+
+self.onmessage = (event) => {
+  const data = event.data || {};
+  if (data.type === 'start') {
+    pump(data).catch((error) => postMessage({ type: 'error', message: String((error && error.message) || error) }));
+  } else if (data.type === 'stop') {
+    stopped = true;
+  }
+};
+`;
 
 let livekitLoader = null;
 
@@ -73,6 +149,7 @@ export class LiveStream {
 
     // Laptop → relay JPEG publisher (lets every other device watch this webcam)
     this.publishTimer = null;
+    this.publishWorker = null;
     this.publishCanvas = null;
     this.publishCtx = null;
     this.publishBusy = false;
@@ -602,7 +679,20 @@ export class LiveStream {
   /* Laptop camera + LiveKit                                            */
   /* ------------------------------------------------------------------ */
 
+  stopWorkerPublisher() {
+    if (this.publishWorker) {
+      try {
+        this.publishWorker.postMessage({ type: 'stop' });
+        this.publishWorker.terminate();
+      } catch {
+        /* ignore */
+      }
+      this.publishWorker = null;
+    }
+  }
+
   stopRelayPublisher() {
+    this.stopWorkerPublisher();
     if (this.publishTimer) clearTimeout(this.publishTimer);
     this.publishTimer = null;
     this.publishBusy = false;
@@ -614,6 +704,99 @@ export class LiveStream {
     }
     this.publishCanvas = null;
     this.publishCtx = null;
+  }
+
+  /**
+   * Publish the camera track from a worker so it keeps running at full speed
+   * while the laptop dashboard tab is hidden. Returns false when the browser
+   * does not support the track processor, so the caller can fall back.
+   */
+  startWorkerPublisher(video, run) {
+    const track = video?.srcObject?.getVideoTracks?.()[0];
+    if (!track) return false;
+    if (
+      typeof MediaStreamTrackProcessor !== 'function' ||
+      typeof Worker !== 'function' ||
+      typeof OffscreenCanvas !== 'function'
+    ) {
+      return false;
+    }
+
+    let readable;
+    try {
+      const processor = new MediaStreamTrackProcessor({ track });
+      readable = processor.readable;
+    } catch {
+      return false;
+    }
+    if (!readable || typeof readable.getReader !== 'function') return false;
+
+    let worker;
+    let url;
+    try {
+      const blob = new Blob([PUBLISH_WORKER_SOURCE], { type: 'text/javascript' });
+      url = URL.createObjectURL(blob);
+      worker = new Worker(url);
+    } catch {
+      if (url) URL.revokeObjectURL(url);
+      return false;
+    }
+
+    this.publishWorker = worker;
+    this.publishStopped = false;
+    this.publishFailures = 0;
+    this.publishFrames = 0;
+
+    worker.onmessage = (event) => {
+      if (!this.started || run !== this.runId || this.publishStopped) return;
+      const data = event.data || {};
+      if (data.type === 'frame') {
+        this.publishFailures = 0;
+        this.publishFrames += 1;
+        return;
+      }
+      if (data.type !== 'error') return;
+      this.publishFailures += 1;
+      const fatal = data.status === 403 || data.status === 404;
+      if (fatal) {
+        this.publishStopped = true;
+        this.stopWorkerPublisher();
+      }
+      if (this.publishFailures === 3 || fatal) {
+        this.onError({
+          code: 'relay_publish_failed',
+          message: data.message || 'Relay rejected the camera frame',
+          mode: 'camera',
+          soft: !fatal,
+        });
+      }
+    };
+
+    worker.onerror = () => {
+      // Worker failed to start; fall back to the timer publisher next time.
+      if (!this.publishStopped) {
+        this.stopWorkerPublisher();
+      }
+    };
+
+    try {
+      worker.postMessage(
+        {
+          type: 'start',
+          readable,
+          endpoint: absoluteUrl(api('/api/laptop/frame')),
+          device: 'LAPTOP-CAM',
+          maxWidth: 640,
+          quality: 0.65,
+          interval: 200,
+        },
+        [readable],
+      );
+    } catch {
+      this.stopWorkerPublisher();
+      return false;
+    }
+    return true;
   }
 
   /** Stop the viewer connection and the local render pump, not the camera. */
@@ -824,6 +1007,10 @@ export class LiveStream {
     this.stopRelayPublisher();
     if (!this.started || run !== this.runId) return;
 
+    // Track-driven worker first: it keeps publishing while the tab is hidden.
+    if (this.startWorkerPublisher(video, run)) return;
+
+    // Fallback for browsers without MediaStreamTrackProcessor/OffscreenCanvas.
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 480;
