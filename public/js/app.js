@@ -445,6 +445,11 @@ const stream = new LiveStream({
       startMode('ws', { announce: false });
       return;
     }
+    if (error.code === 'ws_failed') {
+      showToast(t('toast.wsFallback'), 'warn');
+      startMode('poll', { announce: false });
+      return;
+    }
     showToast(error.message || t('status.offline'), 'error');
   },
   onSensor(message) {
