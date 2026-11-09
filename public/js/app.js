@@ -12,8 +12,8 @@ const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit'];
-const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT' };
+const MODE_IDS = ['mqtt', 'ws', 'webrtc', 'mjpeg', 'poll', 'livekit'];
+const MODE_LABELS = { mqtt: 'MQTT', ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT' };
 const SENSOR_STALE_MS = 12_000;
 
 // Only the machine that runs the relay (opened as localhost) owns the camera.
@@ -443,6 +443,19 @@ const stream = new LiveStream({
     if (state.mode === 'webrtc') {
       showToast(t('toast.webrtcFail'), 'error');
       startMode('ws', { announce: false });
+      return;
+    }
+    if (error.code === 'mqtt_no_frames') {
+      // Broker is fine, camera is simply off. Keep the subscription open so the
+      // feed appears by itself when the ESP32 is powered on.
+      if (state.mode === 'mqtt') showToast(t('toast.mqttWaiting'), 'warn', 6000);
+      return;
+    }
+    if (error.code === 'mqtt_unavailable' || error.code === 'mqtt_failed') {
+      if (state.mode === 'mqtt') {
+        showToast(t('toast.mqttFallback'), 'warn');
+        startMode('poll', { announce: false });
+      }
       return;
     }
     if (error.code === 'ws_failed' || error.code === 'ws_no_frames') {
@@ -1431,12 +1444,11 @@ updateCameraControls();
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
-// The ESP32-CAM pushes frames to /api/upload-frame; the dashboard receives
-// them via HTTP polling or WebSocket. Public HTTPS deployments (Vercel, Render,
-// tunnels) may open a WebSocket that is pinned to a single serverless instance,
-// so HTTP polling is the safe default there: it reads the shared frame store and
-// works no matter which instance handled the camera upload.
-const defaultMode = window.location.protocol === 'https:' ? 'poll' : 'ws';
+// The ESP32-CAM publishes JPEG frames directly to a public MQTT broker. The
+// browser subscribes over WSS, so the feed does not depend on which serverless
+// instance is handling requests. HTTP polling stays as a fallback for setups
+// where the broker is unreachable.
+const defaultMode = window.mqtt ? 'mqtt' : 'poll';
 startMode(defaultMode, { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
@@ -1451,8 +1463,10 @@ setInterval(() => {
   }
 }, 1000);
 
-// Pause sensor reconnects while the tab is hidden, resume on focus.
+// Pause sensor reconnects while the tab is hidden, resume on focus. The MQTT
+// subscription is paused too so a background tab does not download frames.
 document.addEventListener('visibilitychange', () => {
+  if (state.mode === 'mqtt') stream.setBrokerPaused(document.hidden);
   if (!document.hidden && (!sensorSocket || sensorSocket.readyState > WebSocket.OPEN)) {
     connectSensorSocket();
   }

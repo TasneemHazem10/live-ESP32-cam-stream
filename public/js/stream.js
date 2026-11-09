@@ -1,4 +1,4 @@
-﻿import { absoluteUrl, api, wsUrl } from './runtime.js';
+﻿import { BROKER, absoluteUrl, api, wsUrl } from './runtime.js';
 
 const WS_MAX_RECONNECTS = 5;
 
@@ -131,6 +131,8 @@ export class LiveStream {
     this.dc = null;
     this.mjpegImg = null;
     this.mjpegTimer = null;
+    this.mqttClient = null;
+    this.brokerPaused = false;
     this.pollTimer = null;
     this.reconnectTimer = null;
     this.statsTimer = null;
@@ -218,6 +220,8 @@ export class LiveStream {
       this.startWebRtc(run).catch((error) => this.fail(error, run));
     } else if (mode === 'mjpeg') {
       this.startMjpeg(run);
+    } else if (mode === 'mqtt') {
+      this.startMqtt(run);
     } else if (mode === 'poll') {
       this.startPolling(run);
     } else {
@@ -240,6 +244,17 @@ export class LiveStream {
     this.mjpegTimer = null;
     this.pollTimer = null;
     this.firstFrameTimer = null;
+
+    if (this.mqttClient) {
+      try {
+        this.mqttClient.removeAllListeners?.();
+        this.mqttClient.end(true);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.mqttClient = null;
+    this.brokerPaused = false;
 
     if (this.ws) {
       this.ws.onclose = null;
@@ -454,6 +469,135 @@ export class LiveStream {
       this.reconnectTimer = null;
       this.startWebSocket(run);
     }, delay);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* MQTT broker (direct camera → broker → browser)                      */
+  /* ------------------------------------------------------------------ */
+
+  startMqtt(run) {
+    if (!this.started || run !== this.runId) return;
+
+    const lib = window.mqtt;
+    if (!lib?.connect) {
+      this.fail(
+        { code: 'mqtt_unavailable', message: 'MQTT client library failed to load' },
+        run,
+      );
+      return;
+    }
+
+    // A reconnect creates a new client; close the previous one first.
+    if (this.mqttClient) {
+      try {
+        this.mqttClient.removeAllListeners?.();
+        this.mqttClient.end(true);
+      } catch {
+        /* ignore */
+      }
+      this.mqttClient = null;
+    }
+
+    const client = lib.connect(BROKER.url, {
+      clientId: `mirsad_viewer_${Math.random().toString(16).slice(2, 10)}`,
+      username: BROKER.username || undefined,
+      password: BROKER.password || undefined,
+      clean: true,
+      reconnectPeriod: 0,
+      connectTimeout: 8000,
+      keepalive: 30,
+    });
+    this.mqttClient = client;
+    this.brokerPaused = false;
+
+    // The broker can be reachable while the camera is powered off. Do not
+    // switch transports in that case: the subscription stays open and frames
+    // appear the moment the ESP32 publishes again.
+    this.firstFrameTimer = setTimeout(() => {
+      if (!this.started || run !== this.runId || this.frameCount > 0) return;
+      this.fail(
+        { code: 'mqtt_no_frames', message: 'Broker connected but no camera frames arrived' },
+        run,
+      );
+    }, 12_000);
+
+    client.on('connect', () => {
+      if (run !== this.runId) return;
+      this.reconnectAttempts = 0;
+      this.setState('connected');
+      if (!this.brokerPaused) {
+        client.subscribe(BROKER.topic, { qos: 0 }, (error) => {
+          if (error && run === this.runId) {
+            this.fail({ code: 'mqtt_failed', message: `Subscribe failed: ${error.message}` }, run);
+          }
+        });
+      }
+    });
+
+    client.on('message', (topic, payload) => {
+      if (run !== this.runId || this.brokerPaused) return;
+      if (!payload || !payload.length) return;
+
+      if (this.firstFrameTimer) {
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = null;
+      }
+      this.byteCount += payload.length;
+      // Frames are JPEG; the decode queue paints the newest one and drops the
+      // rest if the browser falls behind.
+      this.queueDecode(payload, { source: 'live', width: 320, height: 240 }, run);
+    });
+
+    client.on('error', (error) => {
+      if (run !== this.runId) return;
+      this.lastMqttError = error?.message || String(error);
+      this.scheduleMqttReconnect(run);
+    });
+
+    client.on('close', () => {
+      if (run !== this.runId) return;
+      this.scheduleMqttReconnect(run);
+    });
+  }
+
+  scheduleMqttReconnect(run) {
+    if (!this.started || run !== this.runId) return;
+    if (this.reconnectTimer) return;
+    this.reconnectAttempts += 1;
+
+    if (this.reconnectAttempts > WS_MAX_RECONNECTS) {
+      this.fail(
+        {
+          code: 'mqtt_failed',
+          message: this.lastMqttError || 'MQTT broker unreachable',
+        },
+        run,
+      );
+      return;
+    }
+
+    this.setState('reconnecting');
+    const delay = Math.min(8000, 700 * 2 ** (this.reconnectAttempts - 1));
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.startMqtt(run);
+    }, delay);
+  }
+
+  // Stop pulling frames from the broker while the tab is hidden. The camera
+  // keeps publishing; resubscribing on return delivers the next frame.
+  setBrokerPaused(paused) {
+    const next = Boolean(paused);
+    if (next === this.brokerPaused) return;
+    this.brokerPaused = next;
+
+    const client = this.mqttClient;
+    if (!client?.connected) return;
+    if (next) {
+      client.unsubscribe(BROKER.topic);
+    } else {
+      client.subscribe(BROKER.topic, { qos: 0 });
+    }
   }
 
   async queueDecode(buffer, meta, run) {

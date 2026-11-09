@@ -2,25 +2,23 @@
 
 **Live ESP32-CAM vision dashboard with browser effects, WebRTC/TURN transport and ESP32 sensor telemetry.**
 
-MIRSAD accepts raw **RGB565** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker), converts
-them to JPEG on the server, and fans them out to every browser over **WebSocket**, **MJPEG**,
-**HTTP polling** or a **WebRTC data channel**. The camera only makes outbound HTTPS requests:
-it needs **no public IP, no port forwarding and no NAT traversal**.
+MIRSAD accepts **JPEG** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker) over a public
+**MQTT** broker and paints them in the browser over a secure WebSocket. Because the video path
+is camera → broker → browser, it works on Vercel's serverless hosting without any instance
+affinity, upload endpoint or per-frame function invocation. The camera only makes outbound
+connections: it needs **no public IP, no port forwarding and no NAT traversal**.
 
-Until the ESP32-CAM and sensor node are wired up, the dashboard uses the **laptop webcam** and a
-**live sensor simulator**. Only the relay laptop opens the camera; every other device is a viewer
-that watches the relayed stream and is **never asked for camera access**. The Node relay runs on
-the laptop; **LiveKit Cloud** optionally carries the camera track to viewers outside the LAN. No
-Render account or payment card is required.
+The Node relay is still included for LAN use and accepts raw **RGB565** frames over HTTPS,
+converts them to JPEG, and fans them out over **WebSocket**, **MJPEG**, **HTTP polling** or a
+**WebRTC data channel**. LiveKit Cloud and Metered TURN remain available for the local relay.
 
 The same page shows live readings from an **ESP32 38-pin sensor node** (temperature, humidity,
 soil, light, air quality, motion, pressure, battery and RSSI). The built-in simulator updates every
-two seconds and switches to real readings automatically on the first ESP32 packet. **Metered TURN**
-remains available for restricted / carrier-grade NAT networks.
+two seconds and switches to real readings automatically on the first ESP32 packet.
 
-> **Using the original FieldEye ESP sketches?** They are fully supported. The relay accepts both
-> `X-Api-Key` and `X-Upload-Token`, plus `Authorization: Bearer ...`, `?token=` and `?apiKey=`.
-> For the complete deployment + flashing walkthrough for this exact setup, see
+> **Using the original FieldEye ESP sketches?** They are fully supported by the Node relay. The
+> relay accepts both `X-Api-Key` and `X-Upload-Token`, plus `Authorization: Bearer ...`, `?token=`
+> and `?apiKey=`. For the public-site MQTT setup and the exact flashing steps, see
 > [`LIVE-SETUP.md`](LIVE-SETUP.md).
 
 ---
@@ -159,10 +157,16 @@ See the [firmware guide](firmware/README.md) for wiring, flashing and calibratio
 
 | Transport | Endpoint | Best for | Notes |
 | --- | --- | --- | --- |
-| **WebSocket** | `/ws/frames` | Default low-latency mode | Binary JPEG plus JSON metadata; automatic reconnect |
+| **MQTT** | `wss://public.cloud.shiftr.io` | Public default | Camera publishes JPEG; browser subscribes directly, bypassing serverless instances |
+| **WebSocket** | `/ws/frames` | Local relay low latency | Binary JPEG plus JSON metadata; automatic reconnect |
 | **WebRTC data channel** | `/api/rtc/offer` | Restrictive NAT / CGNAT | 12-byte header + JPEG; uses TURN when Metered is configured |
 | **MJPEG** | `/stream.mjpeg`, `/api/stream.mjpeg` | Compatibility, direct `<img>` use | `multipart/x-mixed-replace` stream |
-| **HTTP polling** | `/api/frame.jpg` | Fallback when sockets are blocked | Polled at ~140 ms with cache busting |
+| **HTTP polling** | `/api/frame.jpg` | Fallback when sockets are blocked | Polled at ~200 ms with cache busting |
+
+The public deploy defaults to **MQTT**: the ESP32-CAM connects to the broker over TLS and the
+browser connects over WSS, so no frame touches Vercel. The other transports use the Node relay
+and its in-memory frame hub, which only works on a single long-running instance (laptop, Docker,
+Render, Railway) — not across isolated serverless instances.
 
 WebRTC uses a data channel rather than VP8/H.264 video because the ESP32 already sends RGB565
 and the server can deliver the same JPEG to every transport. This avoids native codecs and

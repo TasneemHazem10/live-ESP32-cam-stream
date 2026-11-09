@@ -1,33 +1,28 @@
 /*
  * ============================================================================
- *  MIRSAD — ESP32-CAM raw RGB565 streamer
+ *  MIRSAD — ESP32-CAM live streamer (MQTT, direct Wi-Fi)
  * ----------------------------------------------------------------------------
  *  Board      : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
  *  Framework  : Arduino ESP32 core 2.0.x or 3.x
- *  Partition  : "Huge APP (3MB No OTA/1MB SPIFFS)" if the build is too large
+ *  Partition  : "Huge APP (3MB No OTA/1MB SPIFFS)"
  *
- *  What it does
- *  ------------
- *  Captures 320x240 RGB565 frames and POSTs the raw 153,600-byte payload to
- *  the MIRSAD relay. The camera only needs outbound internet access — no
- *  public IP, no port forwarding and no NAT traversal on the device.
+ *  Captures 320x240 JPEG frames and publishes them to a public MQTT broker
+ *  over TLS. The dashboard subscribes to the same topic over a secure
+ *  WebSocket, so video never passes through a serverless function.
  *
- *  Colour order
- *  ------------
- *  The OV2640 usually sends RGB565 high-byte-first. The default below is
- *  therefore "rgb565be". If the browser shows swapped colours (blue skin,
- *  orange sky), set USE_RGB565_BIG_ENDIAN to false and re-upload.
+ *  Unlike esp32cam-wifimanager, this sketch expects the Wi-Fi name and
+ *  password to be compiled in — useful for a permanent installation.
  *
  *  Libraries (install from Library Manager)
  *  ----------------------------------------
- *  - ESP32 board package by Espressif
- *  - (esp_camera is bundled with the board package)
+ *  - ESP32 board package by Espressif (includes esp_camera)
+ *  - "PubSubClient" by Nick O'Leary
  * ============================================================================
  */
 
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
-#include <HTTPClient.h>
+#include <PubSubClient.h>
 #include <esp_camera.h>
 
 // ---------------------------------------------------------------------------
@@ -37,28 +32,21 @@
 const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-// Render URL (or your local relay). Keep the /api/upload-frame path.
-const char *SERVER_URL = "https://livestream-lemon-omega.vercel.app/api/upload-frame";
+// Public MQTT broker. TLS port 8883; browsers use WSS on port 443.
+const char *MQTT_HOST = "public.cloud.shiftr.io";
+const uint16_t MQTT_PORT = 8883;
+const char *MQTT_USER = "public";
+const char *MQTT_PASS = "public";
 
-// Optional: leave empty when UPLOAD_TOKEN is not set on the server.
-const char *UPLOAD_TOKEN = "";
+// Must match BROKER.topic in public/js/runtime.js.
+const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
 
-// Shown in the dashboard and in /api/sensors/devices.
 const char *DEVICE_ID = "ESP32-CAM-01";
 
-// RGB565 byte order. See the note at the top of the file.
-const bool USE_RGB565_BIG_ENDIAN = true;
-
-// 4 fps is a safe default over TLS on Render. 8-10 fps works well on a LAN
-// or when the relay is reachable over plain HTTP.
 const int TARGET_FPS = 4;
-
-// 0°/90°/180°/270° — set both if the module is mounted upside down.
-const bool FLIP_VERTICAL = false;
-const bool FLIP_HORIZONTAL = false;
-
-// AI-Thinker ESP32-CAM red status LED (active LOW).
-const int STATUS_LED_PIN = 33;
+const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+const int JPEG_QUALITY = 14;
+const size_t MQTT_BUFFER_BYTES = 20480;
 
 // ---------------------------------------------------------------------------
 // 2. AI-Thinker camera pin map (RHYX-M21-45 uses the same pinout)
@@ -86,33 +74,30 @@ const int STATUS_LED_PIN = 33;
 // 3. Internals
 // ---------------------------------------------------------------------------
 
-const int FRAME_WIDTH = 320;
-const int FRAME_HEIGHT = 240;
-const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+WiFiClientSecure tlsClient;
+PubSubClient mqtt(tlsClient);
 
-String uploadUrl;
-bool secureTransport = false;
-WiFiClient plainClient;
-WiFiClientSecure secureClient;
+unsigned long lastFrameAt = 0;
+unsigned long lastMqttAttemptAt = 0;
 uint32_t framesSent = 0;
-uint32_t uploadFails = 0;
-uint32_t lastFrameAt = 0;
+uint32_t framesDropped = 0;
 
-void led(bool on) {
-  digitalWrite(STATUS_LED_PIN, on ? LOW : HIGH);
-}
-
-void blink(int times, int durationMs = 80) {
-  for (int i = 0; i < times; i++) {
-    led(true);
-    delay(durationMs);
-    led(false);
-    delay(durationMs);
+void reconnectMqtt() {
+  Serial.printf("[mqtt] connecting to %s:%u ... ", MQTT_HOST, MQTT_PORT);
+  String clientId = String(DEVICE_ID) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)) {
+    Serial.println("connected");
+  } else {
+    Serial.printf("failed (rc=%d)\n", mqtt.state());
   }
 }
 
-bool initCamera() {
-  camera_config_t config = {};
+void setup() {
+  Serial.begin(115200);
+  Serial.setDebugOutput(false);
+  Serial.println();
+
+  camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -127,185 +112,108 @@ bool initCamera() {
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
   config.pin_sccb_sda = SIOD_GPIO_NUM;
   config.pin_sccb_scl = SIOC_GPIO_NUM;
-#else
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
-#endif
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_RGB565;
+
+  config.xclk_freq_hz = 10000000;
+  config.pixel_format = PIXFORMAT_JPEG;
   config.frame_size = FRAMESIZE_QVGA;
-  config.jpeg_quality = 12;
   config.fb_count = psramFound() ? 2 : 1;
-  config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   config.grab_mode = psramFound() ? CAMERA_GRAB_LATEST : CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
+  config.jpeg_quality = JPEG_QUALITY;
 
-  esp_err_t error = esp_camera_init(&config);
-  if (error != ESP_OK) {
-    Serial.printf("[camera] init failed: 0x%x\n", error);
-    return false;
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("[camera] init failed 0x%x -> restarting\n", err);
+    delay(2000);
+    ESP.restart();
   }
 
-  sensor_t *sensor = esp_camera_sensor_get();
-  if (sensor) {
-    sensor->set_framesize(sensor, FRAMESIZE_QVGA);
-    sensor->set_pixformat(sensor, PIXFORMAT_RGB565);
-    sensor->set_brightness(sensor, 0);
-    sensor->set_saturation(sensor, 0);
-    sensor->set_vflip(sensor, FLIP_VERTICAL ? 1 : 0);
-    sensor->set_hmirror(sensor, FLIP_HORIZONTAL ? 1 : 0);
-  }
-
-  Serial.println("[camera] ready at 320x240 RGB565");
-  return true;
-}
-
-void connectWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
   Serial.printf("[wifi] connecting to %s", WIFI_SSID);
-  uint32_t started = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - started < 30000) {
+  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
     delay(500);
-    Serial.print('.');
-    led((millis() / 250) % 2);
+    Serial.print(".");
   }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[wifi] connected, IP=%s RSSI=%d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
-    blink(2);
-  } else {
-    Serial.println("[wifi] connection timeout, restarting in 5s");
-    delay(5000);
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(" failed -> restarting");
     ESP.restart();
   }
-}
+  WiFi.setSleep(false);
+  Serial.println(" connected: " + WiFi.localIP().toString());
 
-int uploadFrame(const uint8_t *buffer, size_t length) {
-  HTTPClient http;
-  http.setConnectTimeout(6000);
-  http.setTimeout(12000);
-  http.setReuse(true);
+  tlsClient.setInsecure();
+  tlsClient.setHandshakeTimeout(15);
 
-  bool started = secureTransport
-                    ? http.begin(secureClient, uploadUrl)
-                    : http.begin(plainClient, uploadUrl);
-  if (!started) {
-    Serial.println("[http] begin failed");
-    return -1;
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(30);
+  mqtt.setSocketTimeout(10);
+  if (!mqtt.setBufferSize(MQTT_BUFFER_BYTES)) {
+    Serial.println("[mqtt] WARNING: could not allocate the frame buffer");
   }
 
-  http.addHeader("Content-Type", "application/octet-stream");
-  http.addHeader("X-Device-Id", DEVICE_ID);
-  if (strlen(UPLOAD_TOKEN) > 0) http.addHeader("X-Upload-Token", UPLOAD_TOKEN);
-
-  uint32_t at = millis();
-  int code = http.POST(const_cast<uint8_t *>(buffer), length);
-  uint32_t elapsed = millis() - at;
-
-  if (code == HTTP_CODE_OK || code == HTTP_CODE_CREATED) {
-    framesSent++;
-    if (framesSent % 25 == 1) {
-      Serial.printf("[upload] #%lu ok %u ms (%u bytes)\n", (unsigned long)framesSent, elapsed, (unsigned)length);
-    }
-    // Consume the small JSON response so the socket can be reused.
-    if (http.connected()) http.getString();
-  } else {
-    uploadFails++;
-    Serial.printf("[upload] failed HTTP %d in %u ms\n", code, elapsed);
-    if (code < 0) http.end();
-    return code;
-  }
-
-  http.end();
-  return code;
-}
-
-void setup() {
-  Serial.begin(115200);
-  delay(300);
-
-  pinMode(STATUS_LED_PIN, OUTPUT);
-  led(false);
-
-  Serial.println();
-  Serial.println("=====================================");
-  Serial.println("  MIRSAD ESP32-CAM RGB565 streamer");
-  Serial.println("=====================================");
-
-  if (!initCamera()) {
-    Serial.println("[camera] check the ribbon cable and power supply");
-    blink(10, 120);
-    delay(3000);
-    ESP.restart();
-  }
-
-  connectWiFi();
-
-  secureTransport = String(SERVER_URL).startsWith("https://");
-  if (secureTransport) {
-    // Render uses a rotating certificate chain. For a production fleet,
-    // replace setInsecure() with the current root CA via setCACert().
-    secureClient.setInsecure();
-    secureClient.setHandshakeTimeout(12);
-  }
-
-  uploadUrl = String(SERVER_URL);
-  uploadUrl += uploadUrl.indexOf('?') >= 0 ? "&" : "?";
-  uploadUrl += "w=" + String(FRAME_WIDTH);
-  uploadUrl += "&h=" + String(FRAME_HEIGHT);
-  uploadUrl += "&format=";
-  uploadUrl += USE_RGB565_BIG_ENDIAN ? "rgb565be" : "rgb565le";
-  uploadUrl += "&device=" + String(DEVICE_ID);
-
-  Serial.printf("[relay] %s\n", uploadUrl.c_str());
-  Serial.printf("[relay] target %d fps, format %s\n", TARGET_FPS,
-                USE_RGB565_BIG_ENDIAN ? "rgb565be" : "rgb565le");
+  Serial.printf("[mqtt] topic: %s\n", MQTT_TOPIC);
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
+    WiFi.reconnect();
+    delay(500);
+    return;
   }
 
-  uint32_t now = millis();
+  if (!mqtt.connected()) {
+    if (millis() - lastMqttAttemptAt >= 3000) {
+      lastMqttAttemptAt = millis();
+      reconnectMqtt();
+    }
+    delay(50);
+    return;
+  }
+
+  unsigned long now = millis();
   if (now - lastFrameAt < FRAME_INTERVAL_MS) {
     delay(5);
     return;
   }
   lastFrameAt = now;
 
-  camera_fb_t *frame = esp_camera_fb_get();
-  if (!frame) {
-    Serial.println("[camera] capture failed");
-    delay(250);
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("[camera] frame capture failed");
+    delay(100);
     return;
   }
 
-  // The sensor is configured for RGB565; guard against a stale JPEG mode.
-  if (frame->format == PIXFORMAT_RGB565 && frame->len >= (size_t)(FRAME_WIDTH * FRAME_HEIGHT * 2)) {
-    led(true);
-    int code = uploadFrame(frame->buf, frame->len);
-    led(false);
-    if (code < 0 && uploadFails % 15 == 0) {
-      Serial.println("[wifi] resetting connection after repeated failures");
-      WiFi.disconnect();
-      delay(1200);
-      WiFi.reconnect();
-    }
-  } else {
-    Serial.printf("[camera] unexpected frame format=%d len=%u\n", frame->format, (unsigned)frame->len);
+  if (fb->format != PIXFORMAT_JPEG || fb->len == 0) {
+    Serial.println("[camera] unexpected frame format");
+    esp_camera_fb_return(fb);
+    return;
   }
 
-  esp_camera_fb_return(frame);
+  if (fb->len > mqtt.getBufferSize()) {
+    framesDropped++;
+    if (framesDropped % 10 == 1) {
+      Serial.printf("[camera] frame too large (%u bytes) — dropping\n", (unsigned)fb->len);
+    }
+    esp_camera_fb_return(fb);
+    return;
+  }
+
+  bool ok = mqtt.publish(MQTT_TOPIC, fb->buf, fb->len, false);
+  size_t frameLen = fb->len;
+  esp_camera_fb_return(fb);
+
+  if (ok) {
+    framesSent++;
+    if (framesSent % 20 == 1) {
+      Serial.printf("[mqtt] published %u frames (%u bytes last)\n", (unsigned)framesSent, (unsigned)frameLen);
+    }
+  } else {
+    Serial.println("[mqtt] publish failed — reconnecting");
+    mqtt.disconnect();
+  }
 }

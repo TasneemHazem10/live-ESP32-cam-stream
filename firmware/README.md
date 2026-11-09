@@ -4,12 +4,13 @@ Three independent Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 RGB565 and POST frames; Wi-Fi configured through the `ESP32-CAM-Config` captive portal |
-| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 RGB565 and POST frames; Wi-Fi SSID/password hard-coded |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** and publish to MQTT; Wi-Fi configured through the `ESP32-CAM-Config` captive portal |
+| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** and publish to MQTT; Wi-Fi SSID/password hard-coded |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
-Both boards only make **outbound** HTTPS requests. Do not port-forward anything and do not give
-either board a public IP.
+The camera sketches publish to `public.cloud.shiftr.io` and the public website subscribes to the
+same topic, so the video path is camera → broker → browser. Both boards only make **outbound**
+connections. Do not port-forward anything and do not give either board a public IP.
 
 > The relay accepts `X-Upload-Token` (these sketches) and `X-Api-Key` (original FieldEye
 > sketches), plus `Authorization: Bearer ...`, `?token=` and `?apiKey=`. For the complete
@@ -31,9 +32,10 @@ either board a public IP.
    - **Adafruit Unified Sensor**
    - **Adafruit BMP280** (only if you enable pressure)
 5. Install **WiFiManager** by tzapu if you use the `esp32cam-wifimanager` sketch.
-6. Select the correct port under **Tools → Port**.
+6. Install **PubSubClient** by Nick O'Leary for either camera sketch.
+7. Select the correct port under **Tools → Port**.
 
-The camera sketches only need the ESP32 board package; `esp_camera.h` is bundled.
+The camera sketches need the ESP32 board package (`esp_camera.h` is bundled) and PubSubClient.
 
 ---
 
