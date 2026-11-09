@@ -35,7 +35,7 @@
 
 // Render URL, or your local relay. End at /api/upload-frame.
 // Local example: "http://192.168.1.50:3000/api/upload-frame"
-const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/upload-frame";
+const char *SERVER_URL = "https://livestream-lemon-omega.vercel.app/api/upload-frame";
 
 // Leave empty when UPLOAD_TOKEN is not set on the server.
 // For production, use the same long random value as Render.

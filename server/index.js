@@ -6,6 +6,7 @@ import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ROOT_DIR, config, PUBLIC_DIR, hasLiveKit, hasUploadAuth } from './config.js';
 import { frameHub } from './frameHub.js';
+import { loadSharedFrame, saveSharedFrame, sharedFramesEnabled } from './frameStore.js';
 import { sensorStore } from './sensors.js';
 import { broadcastSensor, createLiveKitToken, liveKitStatus } from './livekit.js';
 import { isJpeg, parseFlip, parseFormat } from './rgb565.js';
@@ -181,7 +182,7 @@ function frameOptions(req) {
   };
 }
 
-function uploadFrame(req, res) {
+async function uploadFrame(req, res) {
   const started = Date.now();
   const raw = Buffer.isBuffer(req.body) ? req.body : null;
 
@@ -207,6 +208,11 @@ function uploadFrame(req, res) {
       frame = frameHub.ingestRgb565(raw, options);
     }
 
+    // On Vercel the next browser request may land on a different function
+    // instance, so publish the converted JPEG to the shared regional cache
+    // before acknowledging the upload. Local relay deployments skip this.
+    const shared = await saveSharedFrame(frame);
+
     return res.json({
       ok: true,
       seq: frame.seq,
@@ -215,6 +221,7 @@ function uploadFrame(req, res) {
       bytes: raw.length,
       jpegBytes: frame.bytes,
       source: frame.source,
+      shared,
       ms: Date.now() - started,
     });
   } catch (error) {
@@ -225,6 +232,42 @@ function uploadFrame(req, res) {
 /* ------------------------------------------------------------------ */
 /* Camera ingestion                                                    */
 /* ------------------------------------------------------------------ */
+
+async function newestFrame() {
+  const local = frameHub.latest;
+  if (!sharedFramesEnabled) return local;
+
+  const shared = await loadSharedFrame();
+  if (!shared) return local;
+  if (!local) return shared;
+
+  // A real camera frame always wins over a synthetic demo frame.
+  if (shared.source === 'live' && local.source !== 'live') return shared;
+  if (local.source === 'live' && shared.source !== 'live') return local;
+
+  return shared.ts >= local.ts ? shared : local;
+}
+
+function cameraStatusWithShared(localStatus, frame) {
+  if (!frame) return localStatus;
+  const age = Math.max(0, Date.now() - frame.ts);
+  const live = frame.source === 'live' && age < config.frameStaleMs;
+  const demo = frame.source === 'demo' && age < 10_000;
+  return {
+    ...localStatus,
+    connected: live,
+    source: live ? 'live' : demo ? 'demo' : 'none',
+    demo,
+    width: frame.width || localStatus.width,
+    height: frame.height || localStatus.height,
+    frames: Math.max(localStatus.frames || 0, frame.seq || 0),
+    realFrames: Math.max(localStatus.realFrames || 0, frame.seq || 0),
+    lastFrameAt: new Date(frame.ts).toISOString(),
+    ageMs: age,
+    jpegBytes: frame.bytes || frame.jpeg?.length || 0,
+    deviceId: frame.deviceId || null,
+  };
+}
 
 app.post(
   '/api/upload-frame',
@@ -270,8 +313,8 @@ app.post(
   uploadFrame,
 );
 
-app.get('/api/frame.jpg', (req, res) => {
-  const frame = frameHub.latest;
+app.get('/api/frame.jpg', asyncRoute(async (req, res) => {
+  const frame = await newestFrame();
   if (!frame) {
     res.setHeader('Cache-Control', 'no-store');
     return res.status(404).json({ ok: false, error: 'no_frame' });
@@ -283,11 +326,22 @@ app.get('/api/frame.jpg', (req, res) => {
   res.setHeader('X-Frame-Time', String(frame.ts));
   res.setHeader('X-Frame-Source', frame.source);
   return res.send(frame.jpeg);
-});
+}));
 
-app.get('/api/latest-frame', (req, res) => {
-  res.redirect(307, '/api/frame.jpg');
-});
+app.get('/api/latest-frame', asyncRoute(async (req, res) => {
+  const frame = await newestFrame();
+  if (!frame) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).json({ ok: false, error: 'no_frame' });
+  }
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Frame-Seq', String(frame.seq));
+  res.setHeader('X-Frame-Time', String(frame.ts));
+  res.setHeader('X-Frame-Source', frame.source);
+  return res.send(frame.jpeg);
+}));
 
 /* ------------------------------------------------------------------ */
 /* MJPEG streaming                                                     */
@@ -503,6 +557,7 @@ app.delete('/api/rtc/peer/:id', (req, res) => {
 
 app.get('/api/status', asyncRoute(async (req, res) => {
   const ice = await getIceConfig();
+  const camera = cameraStatusWithShared(frameHub.getStatus(), await newestFrame());
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
     ok: true,
@@ -511,7 +566,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
     local: isLocalClient(req),
     serverTime: Date.now(),
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
-    camera: frameHub.getStatus(),
+    camera,
     sensors: sensorStore.getStatus(),
     clients: {
       frames: frameClients.size,
@@ -534,6 +589,8 @@ app.get('/api/status', asyncRoute(async (req, res) => {
       frameSize: `${config.defaultWidth}x${config.defaultHeight}`,
       resolution: { width: config.defaultWidth, height: config.defaultHeight },
       maxFrameBytes: config.maxFrameBytes,
+      sharedFrameStore: sharedFramesEnabled,
+      storage: sharedFramesEnabled ? 'vercel-runtime-cache' : 'memory',
     },
     endpoints: {
       upload: '/api/upload-frame',
@@ -549,15 +606,17 @@ app.get('/api/status', asyncRoute(async (req, res) => {
   });
 }));
 
-app.get('/healthz', (req, res) => {
+app.get('/healthz', asyncRoute(async (req, res) => {
+  const frame = await newestFrame();
+  const camera = cameraStatusWithShared(frameHub.getStatus(), frame);
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     ok: true,
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
-    camera: frameHub.getStatus().source,
+    camera: camera.source,
     sensors: sensorStore.getStatus().source,
   });
-});
+}));
 
 app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, error: 'not_found', path: req.originalUrl });

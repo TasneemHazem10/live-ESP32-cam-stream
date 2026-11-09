@@ -38,7 +38,7 @@ const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // Render URL (or your local relay). Keep the /api/upload-frame path.
-const char *SERVER_URL = "https://YOUR-SERVICE.onrender.com/api/upload-frame";
+const char *SERVER_URL = "https://livestream-lemon-omega.vercel.app/api/upload-frame";
 
 // Optional: leave empty when UPLOAD_TOKEN is not set on the server.
 const char *UPLOAD_TOKEN = "";

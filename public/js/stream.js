@@ -134,6 +134,7 @@ export class LiveStream {
     this.pollTimer = null;
     this.reconnectTimer = null;
     this.statsTimer = null;
+    this.firstFrameTimer = null;
     this.rtcPeerId = null;
 
     // LiveKit / laptop camera state
@@ -233,10 +234,12 @@ export class LiveStream {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.mjpegTimer) clearInterval(this.mjpegTimer);
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.firstFrameTimer) clearTimeout(this.firstFrameTimer);
     this.statsTimer = null;
     this.reconnectTimer = null;
     this.mjpegTimer = null;
     this.pollTimer = null;
+    this.firstFrameTimer = null;
 
     if (this.ws) {
       this.ws.onclose = null;
@@ -375,6 +378,20 @@ export class LiveStream {
     socket.binaryType = 'arraybuffer';
     this.ws = socket;
 
+    // Vercel WebSocket connections are pinned to one function instance. The
+    // socket can open successfully while every ESP32 upload lands on other
+    // instances, so "open" does not mean frames will arrive. If no binary
+    // frame shows up shortly after connecting, switch to HTTP polling, which
+    // reads the shared frame store and therefore works across instances.
+    this.firstFrameTimer = setTimeout(() => {
+      if (!this.started || run !== this.runId) return;
+      if (this.frameCount > 0) return;
+      this.fail(
+        { code: 'ws_no_frames', message: 'WebSocket connected but no frames arrived' },
+        run,
+      );
+    }, 4000);
+
     socket.onopen = () => {
       if (run !== this.runId) return;
       this.connected = true;
@@ -401,6 +418,10 @@ export class LiveStream {
       }
 
       if (!(event.data instanceof ArrayBuffer)) return;
+      if (this.firstFrameTimer) {
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = null;
+      }
       this.byteCount += event.data.byteLength;
       this.queueDecode(event.data, this.wsMeta, run);
     };
@@ -485,6 +506,10 @@ export class LiveStream {
     image.onload = () => {
       if (run !== this.runId || !this.started) return;
       loads += 1;
+      if (this.firstFrameTimer) {
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = null;
+      }
       this.emitFrame(image, {
         width: image.naturalWidth,
         height: image.naturalHeight,
@@ -503,6 +528,17 @@ export class LiveStream {
     };
 
     image.src = api(`/stream.mjpeg?t=${Date.now()}`);
+
+    // Serverless hosts buffer long-lived multipart responses, so the <img>
+    // may never fire load even though the request returns HTTP 200. If the
+    // first frame does not paint, let the app fall back to HTTP polling.
+    this.firstFrameTimer = setTimeout(() => {
+      if (!this.started || run !== this.runId || loads > 0) return;
+      this.fail(
+        { code: 'mjpeg_no_frames', message: 'MJPEG connected but no frames arrived' },
+        run,
+      );
+    }, 5000);
 
     // Safari/older engines do not always fire `load` for multipart images.
     // If that happens, paint the current image on a timer instead.
@@ -532,6 +568,7 @@ export class LiveStream {
     const tick = async () => {
       if (!this.started || run !== this.runId) return;
 
+      let received = false;
       try {
         const response = await fetch(api(`/api/frame.jpg?t=${Date.now()}`), { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -546,6 +583,7 @@ export class LiveStream {
           bitmap.close?.();
           return;
         }
+        received = true;
         this.lastSource = source;
         this.emitFrame(bitmap, {
           width: bitmap.width,
@@ -558,7 +596,9 @@ export class LiveStream {
         this.setState('reconnecting');
       } finally {
         if (this.started && run === this.runId) {
-          this.pollTimer = setTimeout(tick, 140);
+          // Poll at ~5 fps while frames flow; back off to ~1 Hz while the camera
+          // is off so an idle dashboard does not hammer the relay.
+          this.pollTimer = setTimeout(tick, received ? 200 : 1000);
         }
       }
     };

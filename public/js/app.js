@@ -445,9 +445,15 @@ const stream = new LiveStream({
       startMode('ws', { announce: false });
       return;
     }
-    if (error.code === 'ws_failed') {
-      showToast(t('toast.wsFallback'), 'warn');
-      startMode('poll', { announce: false });
+    if (error.code === 'ws_failed' || error.code === 'ws_no_frames') {
+      if (state.mode === 'ws') {
+        if (error.code === 'ws_failed') showToast(t('toast.wsFallback'), 'warn');
+        startMode('poll', { announce: false });
+      }
+      return;
+    }
+    if (error.code === 'mjpeg_no_frames') {
+      if (state.mode === 'mjpeg') startMode('poll', { announce: false });
       return;
     }
     showToast(error.message || t('status.offline'), 'error');
@@ -1426,9 +1432,12 @@ loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
 // The ESP32-CAM pushes frames to /api/upload-frame; the dashboard receives
-// them via WebSocket (or MJPEG/HTTP polling). We no longer open the laptop
-// webcam — the live source is the ESP32-CAM hardware.
-startMode('ws', { announce: false });
+// them via HTTP polling or WebSocket. Public HTTPS deployments (Vercel, Render,
+// tunnels) may open a WebSocket that is pinned to a single serverless instance,
+// so HTTP polling is the safe default there: it reads the shared frame store and
+// works no matter which instance handled the camera upload.
+const defaultMode = window.location.protocol === 'https:' ? 'poll' : 'ws';
+startMode(defaultMode, { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
 // waiting panel instead of leaving a frozen frame on screen.
