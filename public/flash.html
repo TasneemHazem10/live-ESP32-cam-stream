@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flash the MIRSAD ESP32-CAM</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      padding: 32px 20px; background: #0b1020; color: #e8ecf8;
+      font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    main { width: min(720px, 100%); }
+    h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; letter-spacing: -.02em; }
+    p.lede { color: #9aa6c4; margin: 0 0 28px; }
+    ol { padding-left: 20px; }
+    li { margin-bottom: 10px; }
+    code {
+      background: #18213c; border: 1px solid #26314f; border-radius: 6px;
+      padding: 1px 6px; font-size: .92em; color: #cfe0ff;
+    }
+    .card {
+      background: #121a30; border: 1px solid #223052; border-radius: 16px;
+      padding: 24px; margin-bottom: 20px;
+    }
+    esp-web-install-button { --esp-tools-button-color: #2f7cf6; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; border: 0;
+      background: #2f7cf6; color: #fff; font: inherit; font-weight: 600;
+      padding: 12px 22px; border-radius: 10px; cursor: pointer; text-decoration: none;
+    }
+    .note { font-size: 14px; color: #8b97b5; }
+    .warn { color: #ffd479; }
+    footer { margin-top: 28px; font-size: 13px; color: #6f7b98; }
+    a { color: #7fb0ff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Flash the ESP32-CAM</h1>
+    <p class="lede">One time only. After this the camera streams to the website by itself,
+      every time you power it on. It keeps the Wi-Fi it already saved.</p>
+
+    <div class="card">
+      <ol>
+        <li>Use <strong>Chrome or Edge on a computer</strong> (Web Serial is not available in Safari or Firefox).</li>
+        <li>Wire the USB-TTL adapter: <code>5V→5V</code>, <code>GND→GND</code>,
+          <code>TX→U0RXD</code>, <code>RX→U0TXD</code>, and connect <code>GPIO0→GND</code>.</li>
+        <li>Press <strong>RST</strong> on the camera, then plug the adapter into the computer.</li>
+        <li>Click <strong>Install</strong> and pick the serial port (<code>COM…</code>).</li>
+        <li>When it finishes: disconnect <code>GPIO0</code> from <code>GND</code>, press <strong>RST</strong>,
+          and open the <a href="/">live page</a>.</li>
+      </ol>
+
+      <p>
+        <esp-web-install-button manifest="/firmware/manifest.json">
+          <button slot="activate" class="btn">Install firmware</button>
+          <span slot="unsupported" class="warn">This browser cannot flash. Open this page in Chrome or Edge on a computer.</span>
+          <span slot="not-allowed" class="warn">Flashing needs a secure (https) page — open this page from the live site.</span>
+        </esp-web-install-button>
+      </p>
+
+      <p class="note">No Arduino IDE, no libraries, no Wi-Fi password. If the board is not detected,
+        hold <strong>RST</strong>, click Install, and release <strong>RST</strong> when the port starts.</p>
+    </div>
+
+    <p class="note">Already flashed? Just power the camera and open the
+      <a href="/">live page</a> — it connects on its own.</p>
+
+    <footer>MIRSAD · ESP32-CAM firmware v2 (MQTT)</footer>
+  </main>
+</body>
+</html>
