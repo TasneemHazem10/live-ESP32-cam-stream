@@ -64,12 +64,19 @@
         </esp-web-install-button>
       </p>
 
-      <p class="note">No Arduino IDE, no libraries, no Wi-Fi password. If the board is not detected,
-        hold <strong>RST</strong>, click Install, and release <strong>RST</strong> when the port starts.</p>
+      <p class="note">Close the Arduino IDE / Serial Monitor first — an open port cannot be
+        flashed. No libraries, no Wi-Fi password: the network saved on the camera is kept.</p>
+
+      <p class="note">If the port list is empty or fails to connect: hold <strong>RST</strong>,
+        click <strong>Install</strong>, and release <strong>RST</strong> the moment the port appears.</p>
     </div>
 
     <p class="note">Already flashed? Just power the camera and open the
       <a href="/">live page</a> — it connects on its own.</p>
+
+    <p class="note">Successful flash — open Serial Monitor at <code>115200</code> and you should see
+      <code>[boot] MIRSAD camera v2 (MQTT)</code>, then <code>[mqtt] connected</code>.
+      If you still see <code>[boot] MIRSAD camera v2 (MQTT)</code> missing, the flash did not take.</p>
 
     <footer>MIRSAD · ESP32-CAM firmware v2 (MQTT)</footer>
   </main>
