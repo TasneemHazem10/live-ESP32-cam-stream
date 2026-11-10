@@ -23,6 +23,29 @@ No account, no public IP, no port forwarding, no token.
 
 ## 1. Flash the camera (one time, ~1 minute)
 
+### Easiest way — browser, no Arduino IDE
+
+1. Wire a USB-TTL adapter and put the board in boot mode:
+
+   | USB-TTL | ESP32-CAM |
+   | --- | --- |
+   | 5V | 5V |
+   | GND | GND |
+   | TX | U0RXD |
+   | RX | U0TXD |
+   | — | GPIO0 → GND |
+
+2. Press **RST**, then plug the adapter into the PC.
+3. Open <https://livestream-lemon-omega.vercel.app/flash.html> in **Chrome or Edge**.
+4. Click **Install firmware**, pick the `COM…` port, wait for *Installation complete*.
+5. Unplug `GPIO0` from `GND`, press **RST**.
+
+The prebuilt image in `public/firmware/` is already compiled and merged
+(`tools/build-firmware.ps1` regenerates it). The `NVS` partition is not touched,
+so the Wi-Fi the camera already saved keeps working.
+
+### Alternative — Arduino IDE
+
 Open this sketch in Arduino IDE:
 
 ```
