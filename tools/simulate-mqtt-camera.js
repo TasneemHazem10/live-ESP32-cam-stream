@@ -13,7 +13,7 @@ const USER = process.env.MQTT_USER || 'public';
 const PASS = process.env.MQTT_PASS || 'public';
 const WIDTH = 320;
 const HEIGHT = 240;
-const FPS = Number(process.env.FPS || 4);
+const FPS = Number(process.env.FPS || 15);
 
 const client = mqtt.connect(BROKER_URL, {
   clientId: `mirsad_sim_${Math.random().toString(16).slice(2, 10)}`,
@@ -47,7 +47,7 @@ function render(t) {
       data[i] = data[i + 1] = data[i + 2] = 255;
     }
   }
-  return jpeg.encode({ data, width: WIDTH, height: HEIGHT }, 70).data;
+  return jpeg.encode({ data, width: WIDTH, height: HEIGHT }, 55).data;
 }
 
 client.on('connect', () => {

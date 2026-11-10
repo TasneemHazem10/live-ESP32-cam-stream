@@ -14,9 +14,14 @@ ESP32-CAM ──TLS 8883──► public.cloud.shiftr.io ◄──WSS 443── 
 
 No account, no public IP, no port forwarding, no token.
 
+> **Important:** the firmware currently on the camera is the old HTTP uploader
+> that posts to a dead tunnel (`Upload error: connection refused`). No website
+> change can fix that, so the sketch has to be flashed **once**. After that,
+> every power-on connects by itself.
+
 ---
 
-## 1. Flash the camera (one time)
+## 1. Flash the camera (one time, ~1 minute)
 
 Open this sketch in Arduino IDE:
 
@@ -24,7 +29,7 @@ Open this sketch in Arduino IDE:
 C:\Users\Alshuruq Comapny\OneDrive\Desktop\CameraWebServer\CameraWebServer\CameraWebServer.ino
 ```
 
-The repo also contains the same firmware at:
+The repo contains the same firmware at:
 
 ```
 firmware\esp32cam-wifimanager\esp32cam-wifimanager.ino   (WiFiManager portal)
@@ -35,34 +40,41 @@ firmware\esp32cam-streamer\esp32cam-streamer.ino          (Wi-Fi compiled in)
 
 | Setting | Value |
 | --- | --- |
-| Board | **ESP32 Wrover Module** (or AI Thinker ESP32-CAM) |
+| Board | **AI Thinker ESP32-CAM** (or ESP32 Wrover Module) |
 | PSRAM | **Enabled** |
-| Partition Scheme | **Huge APP (3MB No OTA)** or any with ≥ 3 MB app |
+| Partition Scheme | the sketch folder ships `partitions.csv`, so any scheme works (≥ 3 MB app) |
 | Upload speed | 115200 (or 460800 if stable) |
 
-### Libraries (Tools → Manage Libraries)
+### Libraries
 
-- **WiFiManager** by tzapu
-- **PubSubClient** by Nick O'Leary
+**Nothing to install.** `PubSubClient.h` / `PubSubClient.cpp` are inside the same
+sketch folder, and **WiFiManager** is already installed — the current firmware was
+built with it.
+
+If you ever move the sketch to a new computer, install **WiFiManager** by tzapu
+from *Tools → Manage Libraries*.
 
 ### First boot
 
-1. The board opens Wi-Fi **`ESP32-CAM-Config`**.
-2. Connect to it from your phone/laptop.
-3. Choose your home Wi-Fi and enter the password.
-4. Open the Serial Monitor at **115200 baud**. You should see:
+1. Connect `GPIO0` to `GND`, press `RST`, click **Upload**.
+2. Remove `GPIO0` from `GND`, press `RST`, open the Serial Monitor at **115200**.
+3. The board reuses the Wi-Fi it already saved (no portal, no password typing).
+   You should see:
 
 ```text
+[boot] MIRSAD camera v2 (MQTT)
 [wifi] connected: 192.168.x.x
 [mqtt] connecting to public.cloud.shiftr.io:8883 ... connected
 [mqtt] topic: mirsad/live/a7f3c9e1d84b4f06b2a5
-[mqtt] published 20 frames (9480 bytes last)
+[mqtt] streaming to mirsad/live/a7f3c9e1d84b4f06b2a5
+[stats] 15.0 fps, 118 KB/s, 0 dropped
 ```
 
-5. Open the website. The camera pill turns **LIVE** within a few seconds.
+4. Open the website. The camera pill turns **LIVE** within a few seconds.
 
-> The Wi-Fi credentials are stored on the board. On later power-ons it
-> reconnects and starts publishing by itself — no button, refresh or setup.
+> Only if the board has **no** saved Wi-Fi does it open the
+> `ESP32-CAM-Config` hotspot. Join it, choose your network, and it starts
+> streaming. Credentials are stored on the board afterwards.
 
 ---
 
@@ -151,8 +163,11 @@ clients and simulators.
 
 | Symptom | Check |
 | --- | --- |
-| Serial shows `failed (rc=-2)` | Broker unreachable: check Wi-Fi, or try `broker.hivemq.com:8883`. |
+| Serial still shows `Upload error: connection refused` | The board is still running the old firmware. Flash `CameraWebServer.ino` again. |
+| `[mqtt] failed (rc=-2)` | Broker unreachable: check Wi-Fi, or try `broker.hivemq.com:8883`. |
+| `[mqtt] failed (rc=4/5)` | Wrong broker user/password (`public` / `public` on Shiftr). |
 | Serial shows `frame too large` | Lower `JPEG_QUALITY` (e.g. 18) or raise `MQTT_BUFFER_BYTES` if PSRAM allows. |
-| Site says **Waiting for signal** | Serial must print `published N frames`. Topic must match on both sides. |
+| `[camera] init failed 0x105` | Reseat the camera ribbon cable and set PSRAM = **Enabled**. |
+| Site says **Waiting for signal** | Serial must print `[stats] ... fps`. Topic must match on both sides. |
 | Site says **MQTT broker unreachable** | The browser cannot reach the WSS URL; it falls back to HTTP polling. Try `?broker=wss://broker.hivemq.com:8884/mqtt`. |
-| Feed is 1–2 fps | Normal over TLS on a weak Wi-Fi link. Move the camera closer to the router or lower `TARGET_FPS`. |
+| Feed is 1–2 fps | Weak Wi-Fi or thin 5 V supply. Move the camera closer to the router, lower `TARGET_FPS`. |

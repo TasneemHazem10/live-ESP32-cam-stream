@@ -1,64 +1,76 @@
 /*
  * ============================================================================
- *  MIRSAD — ESP32-CAM live streamer (MQTT + WiFiManager)
+ *  MIRSAD — ESP32-CAM live streamer  (v2, MQTT transport)
  * ----------------------------------------------------------------------------
  *  Board      : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
  *  Framework  : Arduino ESP32 core 2.0.x or 3.x
- *  Partition  : "Huge APP (3MB No OTA/1MB SPIFFS)"
  *
- *  What it does
- *  ------------
- *  Captures 320x240 JPEG frames and publishes them to a public MQTT broker
- *  over TLS. The dashboard subscribes to the same topic over a secure
- *  WebSocket, so the video never passes through a serverless function and
- *  keeps working on any number of server instances.
+ *  The camera captures 320x240 JPEG frames ~15 times per second and publishes
+ *  them to a public MQTT broker over TLS. The website subscribes to the same
+ *  topic over a secure WebSocket, so the video goes
  *
- *  Libraries (install from Library Manager)
- *  ----------------------------------------
- *  - ESP32 board package by Espressif (includes esp_camera)
- *  - "WiFiManager" by tzapu
- *  - "PubSubClient" by Nick O'Leary
+ *        ESP32-CAM --TLS 8883--> public.cloud.shiftr.io <--WSS 443-- browser
  *
- *  First boot
- *  ----------
- *  1. Flash the sketch.
- *  2. Connect to Wi-Fi "ESP32-CAM-Config" from your phone/laptop.
- *  3. Choose your home Wi-Fi and enter its password.
- *  4. The board starts publishing frames to the broker.
+ *  Nothing else is needed: no server, no port forwarding, no account, no IP.
+ *  After power-on the camera reconnects to the Wi-Fi it already saved and the
+ *  website shows the image by itself.
+ *
+ *  ---------------------------------------------------------------------------
+ *  FLASH THIS ONCE (about 1 minute)
+ *  ---------------------------------------------------------------------------
+ *  1. Open CameraWebServer.ino in Arduino IDE.
+ *  2. Tools -> Board: "AI Thinker ESP32-CAM"
+ *     Tools -> PSRAM:  "Enabled"
+ *     Tools -> Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
+ *     Tools -> Port: your USB-TTL adapter
+ *  3. Connect GPIO0 to GND, press RST, click Upload.
+ *  4. When it finishes: remove GPIO0 from GND, press RST, open Serial Monitor
+ *     at 115200.
+ *
+ *  Libraries: none to install. PubSubClient.h / PubSubClient.cpp live in this
+ *  same folder, and WiFiManager is already installed on this computer.
+ *
+ *  Wi-Fi: the board keeps the network it saved before, so no captive portal
+ *  should appear. If it does (no saved network), join "ESP32-CAM-Config",
+ *  pick your Wi-Fi, and the board starts streaming.
+ *
+ *  Expected serial output:
+ *      [boot] MIRSAD camera v2 (MQTT)
+ *      [wifi] connected: 192.168.1.24
+ *      [mqtt] connecting to public.cloud.shiftr.io:8883 ... connected
+ *      [mqtt] topic: mirsad/live/a7f3c9e1d84b4f06b2a5
+ *      [stats] 15.0 fps, 118 KB/s, 0 dropped
  * ============================================================================
  */
 
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiClientSecure.h>
-#include <PubSubClient.h>
+#include "PubSubClient.h"
 #include <esp_camera.h>
 
 // ---------------------------------------------------------------------------
-// 1. Configure these values
+// 1. Broker / topic — must match public/js/runtime.js on the website
 // ---------------------------------------------------------------------------
 
-// Public MQTT broker. TLS port 8883; browsers use WSS on port 443.
 const char *MQTT_HOST = "public.cloud.shiftr.io";
 const uint16_t MQTT_PORT = 8883;
 const char *MQTT_USER = "public";
 const char *MQTT_PASS = "public";
-
-// Must match BROKER.topic in public/js/runtime.js.
 const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
 
-// Shown in the serial log.
 const char *DEVICE_ID = "ESP32-CAM-01";
 
-// 4 fps is smooth enough for surveillance and keeps the public broker happy.
-const int TARGET_FPS = 4;
+// 15 fps is smooth and was proven to run loss-free on this broker.
+const int TARGET_FPS = 15;
 const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 
-// Smaller JPEG quality number = smaller frame = more reliable upload.
-const int JPEG_QUALITY = 14;
+// Smaller number = sharper/bigger frame. 16 keeps a QVGA frame around 6-9 KB,
+// which is what makes 15 fps possible over TLS.
+const int JPEG_QUALITY = 16;
 
 // PubSubClient copies the whole JPEG into this buffer before sending.
-const size_t MQTT_BUFFER_BYTES = 20480;
+const size_t MQTT_BUFFER_BYTES = 24576;
 
 // ---------------------------------------------------------------------------
 // 2. AI-Thinker camera pin map (RHYX-M21-45 uses the same pinout)
@@ -83,7 +95,7 @@ const size_t MQTT_BUFFER_BYTES = 20480;
 #define PCLK_GPIO_NUM 22
 
 // ---------------------------------------------------------------------------
-// 3. Internals
+// 3. State
 // ---------------------------------------------------------------------------
 
 WiFiClientSecure tlsClient;
@@ -91,12 +103,15 @@ PubSubClient mqtt(tlsClient);
 
 unsigned long lastFrameAt = 0;
 unsigned long lastMqttAttemptAt = 0;
+unsigned long lastStatsAt = 0;
 uint32_t framesSent = 0;
 uint32_t framesDropped = 0;
+uint32_t statsFrames = 0;
+uint32_t statsBytes = 0;
 
 void reconnectMqtt() {
-  Serial.printf("[mqtt] connecting to %s:%u ... ", MQTT_HOST, MQTT_PORT);
   String clientId = String(DEVICE_ID) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  Serial.printf("[mqtt] connecting to %s:%u ... ", MQTT_HOST, MQTT_PORT);
   if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)) {
     Serial.println("connected");
   } else {
@@ -107,7 +122,9 @@ void reconnectMqtt() {
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
+  delay(200);
   Serial.println();
+  Serial.println("[boot] MIRSAD camera v2 (MQTT)");
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -124,8 +141,13 @@ void setup() {
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   config.pin_sccb_sda = SIOD_GPIO_NUM;
   config.pin_sccb_scl = SIOC_GPIO_NUM;
+#else
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+#endif
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
 
@@ -144,9 +166,12 @@ void setup() {
     ESP.restart();
   }
 
+  // Reuses the Wi-Fi already stored on the board. The portal only opens if the
+  // board has no saved network at all.
   WiFiManager wm;
+  wm.setConnectTimeout(20);
   wm.setConfigPortalTimeout(180);
-  Serial.println("[wifi] connecting or opening AP 'ESP32-CAM-Config'...");
+  Serial.println("[wifi] connecting (portal 'ESP32-CAM-Config' if no saved network)...");
   if (!wm.autoConnect("ESP32-CAM-Config")) {
     Serial.println("[wifi] failed -> restarting");
     ESP.restart();
@@ -165,6 +190,7 @@ void setup() {
   }
 
   Serial.printf("[mqtt] topic: %s\n", MQTT_TOPIC);
+  lastStatsAt = millis();
 }
 
 void loop() {
@@ -183,9 +209,24 @@ void loop() {
     return;
   }
 
+  // Keep the MQTT session healthy (answers pings, notices a dead socket).
+  mqtt.loop();
+
   unsigned long now = millis();
+
+  if (now - lastStatsAt >= 5000) {
+    float seconds = (now - lastStatsAt) / 1000.0f;
+    Serial.printf("[stats] %.1f fps, %.0f KB/s, %u dropped\n",
+                  statsFrames / seconds,
+                  (statsBytes / 1024.0f) / seconds,
+                  (unsigned)framesDropped);
+    statsFrames = 0;
+    statsBytes = 0;
+    lastStatsAt = now;
+  }
+
   if (now - lastFrameAt < FRAME_INTERVAL_MS) {
-    delay(5);
+    delay(2);
     return;
   }
   lastFrameAt = now;
@@ -205,8 +246,8 @@ void loop() {
 
   if (fb->len > mqtt.getBufferSize()) {
     framesDropped++;
-    if (framesDropped % 10 == 1) {
-      Serial.printf("[camera] frame too large (%u bytes) — dropping\n", (unsigned)fb->len);
+    if (framesDropped % 20 == 1) {
+      Serial.printf("[camera] frame too large (%u bytes) - dropping\n", (unsigned)fb->len);
     }
     esp_camera_fb_return(fb);
     return;
@@ -218,11 +259,13 @@ void loop() {
 
   if (ok) {
     framesSent++;
-    if (framesSent % 20 == 1) {
-      Serial.printf("[mqtt] published %u frames (%u bytes last)\n", (unsigned)framesSent, (unsigned)frameLen);
+    statsFrames++;
+    statsBytes += frameLen;
+    if (framesSent == 1) {
+      Serial.printf("[mqtt] streaming to %s\n", MQTT_TOPIC);
     }
   } else {
-    Serial.println("[mqtt] publish failed — reconnecting");
+    Serial.println("[mqtt] publish failed - reconnecting");
     mqtt.disconnect();
   }
 }

@@ -4,8 +4,8 @@ Three independent Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** and publish to MQTT; Wi-Fi configured through the `ESP32-CAM-Config` captive portal |
-| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** and publish to MQTT; Wi-Fi SSID/password hard-coded |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** at **15 fps** and publish to MQTT; reuses the saved Wi-Fi, portal only if none is stored |
+| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Same, but Wi-Fi SSID/password hard-coded |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
 The camera sketches publish to `public.cloud.shiftr.io` and the public website subscribes to the
@@ -32,10 +32,15 @@ connections. Do not port-forward anything and do not give either board a public 
    - **Adafruit Unified Sensor**
    - **Adafruit BMP280** (only if you enable pressure)
 5. Install **WiFiManager** by tzapu if you use the `esp32cam-wifimanager` sketch.
-6. Install **PubSubClient** by Nick O'Leary for either camera sketch.
+   (The copy under `../CameraWebServer/CameraWebServer/` needs nothing extra:
+   `PubSubClient.h`/`.cpp` and `partitions.csv` ship in that folder.)
+6. **PubSubClient** by Nick O'Leary is not needed for `esp32cam-wifimanager` or the
+   Desktop sketch — both bundle `PubSubClient.h`/`.cpp` and `partitions.csv`. Install it only
+   for `esp32cam-streamer`.
 7. Select the correct port under **Tools → Port**.
 
-The camera sketches need the ESP32 board package (`esp_camera.h` is bundled) and PubSubClient.
+The camera sketches need the ESP32 board package (`esp_camera.h` is bundled) and WiFiManager;
+`esp32cam-streamer` also needs PubSubClient.
 
 ---
 
@@ -76,67 +81,57 @@ facing the board and check the 5 V supply.
 
 ### Camera settings to edit
 
-**Recommended: `esp32cam-wifimanager` (captive portal)**
+**Recommended: `esp32cam-wifimanager` (MQTT, saved Wi-Fi)**
 
-Only the relay settings live in code; Wi-Fi credentials are stored on the board after the first
-setup.
+The board keeps the Wi-Fi credentials already stored on it, so re-flashing does not ask for the
+password again.
 
 ```cpp
-const char *SERVER_URL = "http://192.168.1.50:3000/api/upload-frame";
-const char *UPLOAD_TOKEN = "";          // same as .env, or empty
+const char *MQTT_HOST = "public.cloud.shiftr.io";
+const uint16_t MQTT_PORT = 8883;
+const char *MQTT_USER = "public";
+const char *MQTT_PASS = "public";
+const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";   // match runtime.js
 const char *DEVICE_ID = "ESP32-CAM-01";
-const bool USE_RGB565_BIG_ENDIAN = true;
-const int TARGET_FPS = 4;
+const int TARGET_FPS = 15;
+const int JPEG_QUALITY = 16;            // smaller number = sharper, bigger frame
+const size_t MQTT_BUFFER_BYTES = 24576; // must hold one whole JPEG
 ```
 
 First boot:
 
-1. Flash the sketch, then press **RST**.
-2. On your phone or laptop, join the Wi-Fi network **`ESP32-CAM-Config`**.
-3. Choose your home Wi-Fi and enter its password.
-4. The portal closes and the board starts posting frames. Credentials survive reboots.
-5. To change networks later, hold the board in the portal by erasing its Wi-Fi settings
-   (**Tools → Erase Flash → All Flash Contents**) and rebooting.
+1. Flash the sketch, remove `GPIO0` from `GND`, press **RST**, open Serial Monitor at 115200.
+2. The board prints `[wifi] connected: 192.168.x.x` using its stored credentials.
+3. It then prints `[mqtt] connected` and starts streaming; the website goes **LIVE** by itself.
+4. Only if no network is stored does the **`ESP32-CAM-Config`** hotspot appear. Join it, choose
+   your Wi-Fi, and the board starts streaming. Credentials survive reboots.
 
 The portal uses a **180-second timeout**; if it expires, the board restarts and tries again.
+To force it later, erase the Wi-Fi settings (**Tools → Erase Flash → All Flash Contents**).
 
 **Alternative: `esp32cam-streamer` (hard-coded Wi-Fi)**
 
 ```cpp
 const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char *SERVER_URL = "http://192.168.1.50:3000/api/upload-frame";
-const char *UPLOAD_TOKEN = "";          // same as .env, or empty
+const char *MQTT_HOST = "public.cloud.shiftr.io";
+const uint16_t MQTT_PORT = 8883;
+const char *MQTT_USER = "public";
+const char *MQTT_PASS = "public";
+const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
 const char *DEVICE_ID = "ESP32-CAM-01";
-const bool USE_RGB565_BIG_ENDIAN = true;
-const int TARGET_FPS = 4;
+const int TARGET_FPS = 15;
+const int JPEG_QUALITY = 16;
 ```
-
-Both sketches append the required query string automatically:
-
-```text
-?w=320&h=240&format=rgb565be&device=ESP32-CAM-01
-```
-
-Do not include those parameters in `SERVER_URL`; just end with `/api/upload-frame`.
-
-### Why big-endian is the default
-
-The OV2640 normally returns RGB565 high-byte-first (`rgb565be`). If the browser shows blue skin
-and orange sky, the byte order is reversed: set `USE_RGB565_BIG_ENDIAN = false` and re-upload.
-The server supports both `rgb565be` and `rgb565le`.
 
 ### Bandwidth and frame rate
 
-A single 320×240 RGB565 frame is **153,600 bytes**. At 4 fps that is about **4.9 Mbit/s** of
-raw upload, before TLS overhead. The sketch defaults to 4 fps for reliability over mobile/TLS
-links. Increase to 6–10 fps only if the Wi-Fi signal and power supply are solid. The relay
-converts every frame to JPEG (usually 8–30 KB), so downstream viewers use far less bandwidth.
+Frames are **JPEG** (not raw RGB565), about 6–9 KB each at QVGA / quality 16. At 15 fps that is
+roughly **120 KB/s (1 Mbit/s)** of upload after TLS overhead — tested loss-free on Shiftr. If the
+picture stutters, raise `JPEG_QUALITY` (18 makes bigger frames with lower quality), lower
+`TARGET_FPS`, or move the board closer to the access point.
 
-### Camera LED
-
-The red status LED on GPIO 33 is active LOW and lights while a frame is uploading. It is not
-required for operation.
+The camera LED is not used by these sketches.
 
 ---
 
@@ -259,15 +254,15 @@ If the badge stays on `OFF`, the board is not reaching the relay. Open the Seria
 
 | Symptom | Fix |
 | --- | --- |
-| `[camera] init failed: 0x105` | Camera not detected; reseat the ribbon cable, check 5 V and PSRAM setting |
-| `[upload] failed HTTP -1` | DNS/TLS/network failure; confirm the URL starts with `https://` and the board has internet |
-| `[upload] failed HTTP 401` | `UPLOAD_TOKEN` does not match the Render environment variable |
-| `[upload] failed HTTP 400` | Wrong dimensions/format; keep the sketch defaults (`320×240`, RGB565) |
-| Colours swapped | Toggle `USE_RGB565_BIG_ENDIAN` |
+| `[camera] init failed 0x105` | Camera not detected; reseat the ribbon cable, check 5 V and PSRAM setting |
+| `[mqtt] failed (rc=-2)` | Cannot open the TLS socket: no internet, or the network blocks port 8883 |
+| `[mqtt] failed (rc=4/5)` | Broker rejected the login; use `public` / `public` on Shiftr |
+| `[mqtt] publish failed` | Frame bigger than the buffer or link dropped; raise `MQTT_BUFFER_BYTES`, lower `JPEG_QUALITY` |
 | Random resets | Weak 5 V supply; shorten wires, add a 470–1000 µF capacitor near 5 V/GND |
 | Image is dark | Increase `set_brightness` slightly, or add light; the OV2640 needs decent illumination |
 | Very low FPS | Reduce `TARGET_FPS`, move closer to the router, use the external antenna if present |
-| `ESP32-CAM-Config` portal never appears | Board already has saved Wi-Fi credentials | Erase flash (**Tools → Erase Flash → All Flash Contents**) and reboot |
+| `ESP32-CAM-Config` portal never appears | Board already has saved Wi-Fi credentials — that is normal |
+| Serial shows `Upload error: connection refused` | Old HTTP firmware is still flashed; flash the MQTT sketch |
 
 ### Sensor node
 

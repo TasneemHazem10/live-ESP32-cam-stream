@@ -43,10 +43,10 @@ const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
 
 const char *DEVICE_ID = "ESP32-CAM-01";
 
-const int TARGET_FPS = 4;
+const int TARGET_FPS = 15;
 const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
-const int JPEG_QUALITY = 14;
-const size_t MQTT_BUFFER_BYTES = 20480;
+const int JPEG_QUALITY = 16;
+const size_t MQTT_BUFFER_BYTES = 24576;
 
 // ---------------------------------------------------------------------------
 // 2. AI-Thinker camera pin map (RHYX-M21-45 uses the same pinout)
@@ -112,8 +112,13 @@ void setup() {
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   config.pin_sccb_sda = SIOD_GPIO_NUM;
   config.pin_sccb_scl = SIOC_GPIO_NUM;
+#else
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+#endif
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
 
