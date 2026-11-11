@@ -23,6 +23,13 @@ No MQTT, no public broker, no port forwarding, no account on the camera side.
 The browser needs to know one thing: the relay's URL. That is
 `public/js/env.js` → `window.MIRSAD_API_BASE`.
 
+> **This project is already deployed:**
+> - relay → `https://live-esp32-cam-stream.onrender.com` (Render service `srv-dbqbd70m7kps73d2bhtg`)
+> - dashboard → `https://livestream-lemon-omega.vercel.app`
+> - firmware → built with `SERVER_HOST "live-esp32-cam-stream.onrender.com"`
+>
+> Steps 1 and 2 below are already done and are kept for reference / redeployment.
+
 ---
 
 ## Step 1 — Deploy the relay to Render  *(you do this, ~5 minutes)*
@@ -36,7 +43,7 @@ The browser needs to know one thing: the relay's URL. That is
 6. Copy the URL at the top of the service page:
 
    ```text
-   https://mirsad-live-xxxx.onrender.com
+   https://live-esp32-cam-stream.onrender.com
    ```
 
 **Send that URL back** so it can be baked into the site and the firmware.
@@ -52,13 +59,13 @@ Notes:
 ### Check it without any hardware
 
 ```powershell
-$env:SERVER_URL = "https://mirsad-live-xxxx.onrender.com"
+$env:SERVER_URL = "https://live-esp32-cam-stream.onrender.com"
 
 # the exact request the firmware makes (153,600-byte RGB565):
 node tools/esp-post-check.js
 
 # continuous synthetic stream, then open the site:
-$env:SERVER_URL = "https://mirsad-live-xxxx.onrender.com"; node tools/simulate-camera.js
+$env:SERVER_URL = "https://live-esp32-cam-stream.onrender.com"; node tools/simulate-camera.js
 ```
 
 `esp-post-check.js` prints `PASS` and eight colour bars when the upload path,
@@ -71,13 +78,13 @@ byte order and JPEG encoding are all correct.
 Edit `public/js/env.js`:
 
 ```js
-window.MIRSAD_API_BASE = 'https://mirsad-live-xxxx.onrender.com';
+window.MIRSAD_API_BASE = 'https://live-esp32-cam-stream.onrender.com';
 ```
 
 Commit + push, or test instantly without touching code by adding the parameter:
 
 ```text
-https://livestream-lemon-omega.vercel.app/?api=https://mirsad-live-xxxx.onrender.com
+https://livestream-lemon-omega.vercel.app/?api=https://live-esp32-cam-stream.onrender.com
 ```
 
 `https://livestream-lemon-omega.vercel.app/` alone (no `?api=`) talks to its own
@@ -90,7 +97,7 @@ origin, which has no relay — it will sit on "waiting for camera".
 `SERVER_HOST` in the sketch must be the Render host **without** `https://`:
 
 ```cpp
-#define SERVER_HOST "mirsad-live-xxxx.onrender.com"
+#define SERVER_HOST "live-esp32-cam-stream.onrender.com"
 ```
 
 Then either:
@@ -123,7 +130,7 @@ Serial Monitor at `115200`:
 ```text
 [boot] MIRSAD camera v3 (HTTP RGB565)
 [wifi] connected: 192.168.1.24
-[relay] https://mirsad-live-xxxx.onrender.com:443/api/upload-frame?w=320&h=240&format=rgb565le&device=ESP32-CAM-RHYX
+[relay] https://live-esp32-cam-stream.onrender.com:443/api/upload-frame?w=320&h=240&format=rgb565le&device=ESP32-CAM-RHYX
 [relay] awake (HTTP 200)
 [post] first frame accepted by the relay
 [stats] 4.8 fps, 720 KB/s, 0 failed

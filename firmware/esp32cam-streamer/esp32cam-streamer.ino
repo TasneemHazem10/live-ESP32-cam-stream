@@ -33,7 +33,7 @@ const char *WIFI_SSID = "YOUR_WIFI_NAME";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // Render host only — no https://, no trailing slash.
-const char *SERVER_HOST = "mirsad-live.onrender.com";
+const char *SERVER_HOST = "live-esp32-cam-stream.onrender.com";
 const uint16_t SERVER_PORT = 443;
 const char *UPLOAD_PATH = "/api/upload-frame";
 

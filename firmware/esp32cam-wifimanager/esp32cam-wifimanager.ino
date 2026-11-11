@@ -42,7 +42,7 @@
 // 1. Relay (Render) — EDIT THIS ONE LINE
 // ---------------------------------------------------------------------------
 
-#define SERVER_HOST "mirsad-live.onrender.com"
+#define SERVER_HOST "live-esp32-cam-stream.onrender.com"
 #define SERVER_PORT 443
 #define UPLOAD_PATH "/api/upload-frame"
 
