@@ -207,7 +207,7 @@ code {
 }
 
 /* --------------------------------------------------------------------------
-   Space background
+   Space background — professional cinematic animations
    -------------------------------------------------------------------------- */
 
 .bg-layer {
@@ -217,21 +217,40 @@ code {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(1400px 800px at 85% -5%, rgba(0, 240, 255, 0.06), transparent 55%),
-    radial-gradient(1100px 700px at 5% 25%, rgba(179, 136, 255, 0.05), transparent 58%),
-    radial-gradient(1000px 700px at 55% 110%, rgba(163, 255, 107, 0.04), transparent 55%),
+    radial-gradient(1600px 900px at 85% -5%, rgba(0, 240, 255, 0.04), transparent 55%),
+    radial-gradient(1300px 800px at 5% 25%, rgba(179, 136, 255, 0.035), transparent 58%),
+    radial-gradient(1100px 800px at 55% 110%, rgba(163, 255, 107, 0.025), transparent 55%),
     var(--bg);
 }
+
+/* ---- Starfield layers (parallax depth) ---- */
 
 .starfield {
   position: absolute;
   inset: 0;
   opacity: 0.9;
-  background-image: radial-gradient(white 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(circle at 50% 40%, #000 15%, transparent 60%);
-  -webkit-mask-image: radial-gradient(circle at 50% 40%, #000 15%, transparent 60%);
+  background-image:
+    radial-gradient(1.5px 1.5px, #e8eefd 50%, transparent 50%),
+    radial-gradient(2px 2px, #b8c4dc 50%, transparent 50%);
+  background-size: 200px 200px, 300px 300px;
+  background-color: transparent;
+  mask-image: radial-gradient(circle at 50% 40%, #000 15%, transparent 65%);
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, #000 15%, transparent 65%);
+  animation: starfield-drift 120s linear infinite;
 }
+
+.starfield::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px, #a3ff6b 60%, transparent 60%);
+  background-size: 450px 450px;
+  opacity: 0.3;
+  animation: starfield-drift 180s linear infinite reverse;
+}
+
+/* ---- Individual twinkling stars ---- */
 
 .star {
   position: absolute;
@@ -239,52 +258,177 @@ code {
   background: #fff;
   opacity: 0;
   will-change: transform, opacity;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
 
 .star.twinkle {
   animation: twinkle var(--dur, 4s) var(--ease, ease) infinite alternate;
 }
 
+.star.large {
+  width: 3px;
+  height: 3px;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.4), 0 0 24px rgba(179, 136, 255, 0.2);
+}
+
+.star.giant {
+  width: 4px;
+  height: 4px;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.5), 0 0 32px rgba(179, 136, 255, 0.3);
+  filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.3));
+}
+
+/* ---- Constellation lines ---- */
+
+.constellation {
+  position: absolute;
+  inset: 0;
+  opacity: 0.25;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(0, 240, 255, 0.4) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 240, 255, 0.4) 1px, transparent 1px);
+  background-size: 300px 300px;
+  animation: constellation-pulse 8s ease-in-out infinite alternate;
+  mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 20%, transparent 70%);
+}
+
+/* ---- Nebulae (multi-layered, color-shifting) ---- */
+
 .nebula {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.45;
-  will-change: transform;
+  filter: blur(70px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: nebula-breathe 10s ease-in-out infinite alternate;
 }
 
 .nebula-a {
-  width: 52vw;
-  height: 52vw;
-  max-width: 700px;
-  max-height: 700px;
-  top: -20vw;
-  inset-inline-end: -10vw;
-  background: radial-gradient(circle at 35% 35%, rgba(0, 240, 255, 0.25), transparent 65%);
-  animation: nebula-drift 24s var(--ease) infinite alternate;
+  width: 56vw;
+  height: 56vw;
+  max-width: 800px;
+  max-height: 800px;
+  top: -22vw;
+  inset-inline-end: -12vw;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0, 240, 255, 0.28), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(179, 136, 255, 0.18), transparent 70%);
+  opacity: 0.5;
+  animation: nebula-drift 26s var(--ease) infinite alternate, nebula-breathe 12s ease-in-out infinite alternate;
 }
 
 .nebula-b {
-  width: 46vw;
-  height: 46vw;
-  max-width: 620px;
-  max-height: 620px;
-  top: 30%;
-  inset-inline-start: -18vw;
-  background: radial-gradient(circle at 60% 40%, rgba(179, 136, 255, 0.22), transparent 65%);
-  animation: nebula-drift 30s var(--ease) infinite alternate-reverse;
+  width: 50vw;
+  height: 50vw;
+  max-width: 720px;
+  max-height: 720px;
+  top: 28%;
+  inset-inline-start: -20vw;
+  background:
+    radial-gradient(circle at 60% 40%, rgba(179, 136, 255, 0.26), transparent 62%),
+    radial-gradient(circle at 40% 60%, rgba(0, 240, 255, 0.14), transparent 68%);
+  opacity: 0.45;
+  animation: nebula-drift 32s var(--ease) infinite alternate-reverse, nebula-breathe 15s ease-in-out infinite alternate;
 }
 
 .nebula-c {
-  width: 40vw;
-  height: 40vw;
-  max-width: 540px;
-  max-height: 540px;
-  bottom: -18vw;
-  inset-inline-start: 35%;
-  background: radial-gradient(circle at 50% 50%, rgba(255, 209, 102, 0.14), transparent 65%);
-  animation: nebula-drift 36s var(--ease) infinite alternate;
+  width: 44vw;
+  height: 44vw;
+  max-width: 620px;
+  max-height: 620px;
+  bottom: -20vw;
+  inset-inline-start: 38%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 209, 102, 0.16), transparent 64%),
+    radial-gradient(circle at 80% 20%, rgba(244, 114, 182, 0.12), transparent 70%);
+  opacity: 0.4;
+  animation: nebula-drift 38s var(--ease) infinite alternate, nebula-breathe 18s ease-in-out infinite alternate;
 }
+
+.nebula-d {
+  width: 38vw;
+  height: 38vw;
+  max-width: 560px;
+  max-height: 560px;
+  top: 45%;
+  inset-inline-start: 45%;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(244, 114, 182, 0.15), transparent 66%),
+    radial-gradient(circle at 80% 30%, rgba(163, 255, 107, 0.12), transparent 72%);
+  opacity: 0.35;
+  animation: nebula-drift 44s var(--ease) infinite alternate-reverse, nebula-breathe 20s ease-in-out infinite alternate;
+}
+
+/* ---- Orbiting planets / moons ---- */
+
+.orbit-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgba(148, 163, 184, 0.08);
+  pointer-events: none;
+  animation: spin 40s linear infinite;
+}
+
+.orbit-ring.a {
+  width: 22vw;
+  height: 22vw;
+  max-width: 300px;
+  max-height: 300px;
+  top: 15%;
+  inset-inline-start: 10%;
+  border-color: rgba(0, 240, 255, 0.12);
+  animation-duration: 34s;
+}
+
+.orbit-ring.b {
+  width: 18vw;
+  height: 18vw;
+  max-width: 260px;
+  max-height: 260px;
+  bottom: 20%;
+  inset-inline-end: 15%;
+  border-color: rgba(179, 136, 255, 0.12);
+  animation-duration: 48s;
+  animation-direction: reverse;
+}
+
+.orbit-planet {
+  position: absolute;
+  border-radius: 50%;
+  box-shadow: 0 0 20px currentColor;
+  pointer-events: none;
+}
+
+.orbit-planet.a {
+  width: 14px;
+  height: 14px;
+  background: #00f0ff;
+  top: 50%;
+  inset-inline-start: -7px;
+  margin-top: -7px;
+}
+
+.orbit-planet.b {
+  width: 10px;
+  height: 10px;
+  background: #b388ff;
+  top: 50%;
+  inset-inline-end: -5px;
+  margin-top: -5px;
+}
+
+.orbit-planet.c {
+  width: 8px;
+  height: 8px;
+  background: #ffd166;
+  bottom: 0;
+  inset-inline-start: 50%;
+  margin-left: -4px;
+}
+
+/* ---- Shooting stars ---- */
 
 .shooting-star {
   position: absolute;
@@ -304,38 +448,125 @@ code {
   position: absolute;
   top: 2px;
   inset-inline-start: 2px;
-  width: 120px;
+  width: 140px;
   height: 1px;
   background: linear-gradient(to right, #fff, transparent);
   transform: rotate(45deg);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
 }
 
-.shooting-star:nth-child(2) { inset-inline-start: 55%; top: -40px; animation: shoot 7s linear infinite 1.5s; }
-.shooting-star:nth-child(3) { inset-inline-start: 80%; top: -80px; animation: shoot 6s linear infinite 3s; }
-.shooting-star:nth-child(4) { inset-inline-start: 20%; top: -100px; animation: shoot 8s linear infinite 5s; }
+.shooting-star:nth-child(2) {
+  inset-inline-start: 55%;
+  top: -40px;
+  animation: shoot 7s linear infinite 1.5s;
+}
+.shooting-star:nth-child(3) {
+  inset-inline-start: 80%;
+  top: -80px;
+  animation: shoot 6s linear infinite 3s;
+}
+.shooting-star:nth-child(4) {
+  inset-inline-start: 20%;
+  top: -100px;
+  animation: shoot 8s linear infinite 5s;
+}
+
+/* ---- Aurora / solar wind effect ---- */
+
+.aurora {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, rgba(0, 240, 255, 0.04), transparent 25%, rgba(179, 136, 255, 0.04), transparent 75%, rgba(0, 240, 255, 0.04)),
+    linear-gradient(to bottom, transparent 40%, rgba(0, 0, 0, 0.15) 100%);
+  animation: aurora-flow 20s ease-in-out infinite;
+  mask-image: linear-gradient(to bottom, transparent 20%, #000 60%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 20%, #000 60%, #000 100%);
+}
+
+/* ---- Floating space dust particles ---- */
+
+.dust-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.dust-particle.small {
+  width: 1px;
+  height: 1px;
+}
+.dust-particle.medium {
+  width: 2px;
+  height: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   Professional space animations
+   -------------------------------------------------------------------------- */
 
 @keyframes twinkle {
-  0% { opacity: 0.2; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.15); }
-  100% { opacity: 0.3; transform: scale(1); }
+  0% { opacity: 0.15; transform: scale(1); filter: brightness(1); }
+  25% { opacity: 0.45; transform: scale(1.08); filter: brightness(1.2); }
+  50% { opacity: 0.8; transform: scale(1); filter: brightness(1); }
+  75% { opacity: 0.5; transform: scale(1.05); filter: brightness(1.1); }
+  100% { opacity: 0.2; transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes starfield-drift {
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(200px, 100px, 0); }
+}
+
+@keyframes constellation-pulse {
+  0% { opacity: 0.15; transform: scale(1); }
+  100% { opacity: 0.35; transform: scale(1.05); }
 }
 
 @keyframes nebula-drift {
   0% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(3vw, 4vh, 0) scale(1.1); }
-  100% { transform: translate3d(-3vw, -3vh, 0) scale(0.95); }
+  33% { transform: translate3d(4vw, 6vh, 0) scale(1.08); }
+  66% { transform: translate3d(-2vw, -4vh, 0) scale(1.04); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes nebula-breathe {
+  0% { opacity: 0.35; filter: blur(70px); }
+  50% { opacity: 0.55; filter: blur(55px); }
+  100% { opacity: 0.35; filter: blur(70px); }
 }
 
 @keyframes shoot {
   0% { transform: translate3d(0, 0, 0); opacity: 0; }
-  20% { opacity: 1; }
-  100% { transform: translate3d(60vw, 70vh, 0); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate3d(70vw, 80vh, 0); opacity: 0; }
+}
+
+@keyframes aurora-flow {
+  0% { background-position: 0% 50%, 0% 0%; }
+  50% { background-position: 100% 50%, 100% 100%; }
+  100% { background-position: 0% 50%, 0% 0%; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes orb-drift {
   0% { transform: translate3d(0, 0, 0) scale(1); }
   50% { transform: translate3d(3vw, 4vh, 0) scale(1.08); }
   100% { transform: translate3d(-3vw, -3vh, 0) scale(0.96); }
+}
+
+@keyframes dust-float {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; }
+  20% { opacity: 0.4; }
+  80% { opacity: 0.4; }
+  100% { transform: translate3d(40vw, 60vh, 0); opacity: 0; }
 }
 
 /* --------------------------------------------------------------------------

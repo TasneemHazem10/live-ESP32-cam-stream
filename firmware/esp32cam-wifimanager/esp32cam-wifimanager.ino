@@ -1,79 +1,76 @@
 /*
  * ============================================================================
- *  MIRSAD — ESP32-CAM live streamer  (v2, MQTT transport)
+ *  MIRSAD — ESP32-CAM live streamer  (v3, HTTP RGB565 — spec transport)
  * ----------------------------------------------------------------------------
- *  Board      : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
- *  Framework  : Arduino ESP32 core 2.0.x or 3.x
+ *  Board   : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
+ *  Sensor  : 320x240 (QVGA), raw RGB565, 2 bytes/pixel -> 153,600 B per frame
+ *  Uplink  : HTTP POST application/octet-stream to the relay on Render
  *
- *  The camera captures 320x240 JPEG frames ~15 times per second and publishes
- *  them to a public MQTT broker over TLS. The website subscribes to the same
- *  topic over a secure WebSocket, so the video goes
+ *        ESP32-CAM --HTTPS POST /api/upload-frame--> Render relay
+ *        Render relay --WSS /ws/frames (JPEG)------> browser
  *
- *        ESP32-CAM --TLS 8883--> public.cloud.shiftr.io <--WSS 443-- browser
- *
- *  Nothing else is needed: no server, no port forwarding, no account, no IP.
- *  After power-on the camera reconnects to the Wi-Fi it already saved and the
- *  website shows the image by itself.
+ *  The relay decodes RGB565 to JPEG and fans it out over WebSocket, MJPEG or
+ *  HTTP polling, so the camera never needs a public IP or port forwarding.
  *
  *  ---------------------------------------------------------------------------
- *  FLASH THIS ONCE (about 1 minute)
+ *  BEFORE FLASHING: set SERVER_HOST below
  *  ---------------------------------------------------------------------------
- *  1. Open CameraWebServer.ino in Arduino IDE.
- *  2. Tools -> Board: "AI Thinker ESP32-CAM"
- *     Tools -> PSRAM:  "Enabled"
- *     Tools -> Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
- *     Tools -> Port: your USB-TTL adapter
- *  3. Connect GPIO0 to GND, press RST, click Upload.
- *  4. When it finishes: remove GPIO0 from GND, press RST, open Serial Monitor
- *     at 115200.
+ *  SERVER_HOST must be the Render service host (no https://, no trailing /):
+ *      Render dashboard -> your service -> the URL under the name,
+ *      e.g. "mirsad-live-ab12.onrender.com"
  *
- *  Libraries: none to install. PubSubClient.h / PubSubClient.cpp live in this
- *  same folder, and WiFiManager is already installed on this computer.
+ *  Wi-Fi: the board reuses the network it already saved, so no captive portal
+ *  appears. If there is no saved network it opens "ESP32-CAM-Config".
  *
- *  Wi-Fi: the board keeps the network it saved before, so no captive portal
- *  should appear. If it does (no saved network), join "ESP32-CAM-Config",
- *  pick your Wi-Fi, and the board starts streaming.
- *
- *  Expected serial output:
- *      [boot] MIRSAD camera v2 (MQTT)
+ *  Expected serial output at 115200 baud:
+ *      [boot] MIRSAD camera v3 (HTTP RGB565)
  *      [wifi] connected: 192.168.1.24
- *      [mqtt] connecting to public.cloud.shiftr.io:8883 ... connected
- *      [mqtt] topic: mirsad/live/a7f3c9e1d84b4f06b2a5
- *      [stats] 15.0 fps, 118 KB/s, 0 dropped
+ *      [relay] https://…/api/upload-frame?w=320&h=240&format=rgb565le…
+ *      [relay] awake (HTTP 200)
+ *      [post] 1 frames, 153600 B, 0 failed
+ *      [stats] 4.8 fps, 720 KB/s, 0 failed
  * ============================================================================
  */
 
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <WiFiClientSecure.h>
-#include "PubSubClient.h"
+#include <HTTPClient.h>
 #include <esp_camera.h>
 
 // ---------------------------------------------------------------------------
-// 1. Broker / topic — must match public/js/runtime.js on the website
+// 1. Relay (Render) — EDIT THIS ONE LINE
 // ---------------------------------------------------------------------------
 
-const char *MQTT_HOST = "public.cloud.shiftr.io";
-const uint16_t MQTT_PORT = 8883;
-const char *MQTT_USER = "public";
-const char *MQTT_PASS = "public";
-const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
+#define SERVER_HOST "mirsad-live.onrender.com"
+#define SERVER_PORT 443
+#define UPLOAD_PATH "/api/upload-frame"
 
-const char *DEVICE_ID = "ESP32-CAM-01";
+// Optional shared secret. Leave empty unless UPLOAD_TOKEN is set on Render.
+#define UPLOAD_TOKEN ""
 
-// 15 fps is smooth and was proven to run loss-free on this broker.
-const int TARGET_FPS = 15;
-const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
-
-// Smaller number = sharper/bigger frame. 16 keeps a QVGA frame around 6-9 KB,
-// which is what makes 15 fps possible over TLS.
-const int JPEG_QUALITY = 16;
-
-// PubSubClient copies the whole JPEG into this buffer before sending.
-const size_t MQTT_BUFFER_BYTES = 24576;
+#define DEVICE_ID "ESP32-CAM-RHYX"
 
 // ---------------------------------------------------------------------------
-// 2. AI-Thinker camera pin map (RHYX-M21-45 uses the same pinout)
+// 2. Frame parameters (must match the handover spec)
+// ---------------------------------------------------------------------------
+
+#define FRAME_W 320
+#define FRAME_H 240
+#define FRAME_BYTES (FRAME_W * FRAME_H * 2)   // 153,600 bytes
+
+// RGB565 is 153,600 B/frame, so each frame is ~20x a JPEG. 5 fps is a good
+// compromise (about 2.7 GB/hour). Lower this on metered links.
+#define TARGET_FPS 5
+#define FRAME_INTERVAL_MS (1000 / TARGET_FPS)
+
+// Wake-up ping: Render's free tier sleeps when idle. The first request can take
+// up to a minute, so wait for /healthz before streaming instead of failing.
+#define HEALTH_PATH "/healthz"
+#define WAKE_TIMEOUT_MS 90000
+
+// ---------------------------------------------------------------------------
+// 3. AI-Thinker camera pin map (RHYX-M21-45 uses the same pinout)
 // ---------------------------------------------------------------------------
 
 #define PWDN_GPIO_NUM 32
@@ -95,36 +92,64 @@ const size_t MQTT_BUFFER_BYTES = 24576;
 #define PCLK_GPIO_NUM 22
 
 // ---------------------------------------------------------------------------
-// 3. State
+// 4. State
 // ---------------------------------------------------------------------------
 
 WiFiClientSecure tlsClient;
-PubSubClient mqtt(tlsClient);
+String uploadUrl;
 
 unsigned long lastFrameAt = 0;
-unsigned long lastMqttAttemptAt = 0;
 unsigned long lastStatsAt = 0;
+unsigned long lastReconnectAt = 0;
 uint32_t framesSent = 0;
-uint32_t framesDropped = 0;
+uint32_t framesFailed = 0;
 uint32_t statsFrames = 0;
 uint32_t statsBytes = 0;
 
-void reconnectMqtt() {
-  String clientId = String(DEVICE_ID) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-  Serial.printf("[mqtt] connecting to %s:%u ... ", MQTT_HOST, MQTT_PORT);
-  if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)) {
-    Serial.println("connected");
-  } else {
-    Serial.printf("failed (rc=%d)\n", mqtt.state());
+// ---------------------------------------------------------------------------
+// 5. Helper: wait for the relay to answer (wakes a sleeping Render instance)
+// ---------------------------------------------------------------------------
+
+bool wakeRelay() {
+  HTTPClient http;
+  String url = String("https://") + SERVER_HOST + ":" + SERVER_PORT + HEALTH_PATH;
+  http.setConnectTimeout(15000);
+  http.setTimeout(15000);
+  http.setReuse(false);
+
+  unsigned long started = millis();
+  int attempt = 0;
+  while (millis() - started < WAKE_TIMEOUT_MS) {
+    attempt++;
+    if (!http.begin(tlsClient, url)) {
+      Serial.printf("[relay] begin failed (attempt %d)\n", attempt);
+      delay(2000);
+      continue;
+    }
+    int code = http.GET();
+    http.end();
+    if (code > 0 && code < 500) {
+      Serial.printf("[relay] awake (HTTP %d)\n", code);
+      return true;
+    }
+    Serial.printf("[relay] not ready yet (HTTP %d), retrying...\n", code);
+    tlsClient.stop();
+    delay(3000);
   }
+  Serial.println("[relay] wake-up timed out; will keep trying in the loop");
+  return false;
 }
+
+// ---------------------------------------------------------------------------
+// 6. Setup
+// ---------------------------------------------------------------------------
 
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(200);
   Serial.println();
-  Serial.println("[boot] MIRSAD camera v2 (MQTT)");
+  Serial.println("[boot] MIRSAD camera v3 (HTTP RGB565)");
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -151,13 +176,13 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
 
-  config.xclk_freq_hz = 10000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QVGA;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_RGB565;   // spec: no hardware JPEG
+  config.frame_size = FRAMESIZE_QVGA;       // 320x240
   config.fb_count = psramFound() ? 2 : 1;
   config.grab_mode = psramFound() ? CAMERA_GRAB_LATEST : CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
-  config.jpeg_quality = JPEG_QUALITY;
+  config.jpeg_quality = 12;                 // ignored in RGB565 mode
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -166,8 +191,16 @@ void setup() {
     ESP.restart();
   }
 
-  // Reuses the Wi-Fi already stored on the board. The portal only opens if the
-  // board has no saved network at all.
+  sensor_t *sensor = esp_camera_sensor_get();
+  if (sensor) {
+    sensor->set_vflip(sensor, 0);
+    sensor->set_hmirror(sensor, 0);
+    sensor->set_brightness(sensor, 0);
+    sensor->set_saturation(sensor, 0);
+  }
+
+  // Reuses the Wi-Fi already stored on the board; the portal only opens when
+  // there is no saved network at all.
   WiFiManager wm;
   wm.setConnectTimeout(20);
   wm.setConfigPortalTimeout(180);
@@ -179,47 +212,83 @@ void setup() {
   WiFi.setSleep(false);
   Serial.println("[wifi] connected: " + WiFi.localIP().toString());
 
-  tlsClient.setInsecure();
-  tlsClient.setHandshakeTimeout(15);
+  tlsClient.setInsecure();            // Render's certificate is valid; no CA bundle on the board
+  tlsClient.setHandshakeTimeout(20);
 
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt.setKeepAlive(30);
-  mqtt.setSocketTimeout(10);
-  if (!mqtt.setBufferSize(MQTT_BUFFER_BYTES)) {
-    Serial.println("[mqtt] WARNING: could not allocate the frame buffer");
-  }
+  uploadUrl = String("https://") + SERVER_HOST + ":" + SERVER_PORT + UPLOAD_PATH;
+  uploadUrl += String("?w=") + FRAME_W + "&h=" + FRAME_H + "&format=rgb565le";
+  uploadUrl += String("&device=") + DEVICE_ID;
+  if (strlen(UPLOAD_TOKEN) > 0) uploadUrl += String("&token=") + UPLOAD_TOKEN;
 
-  Serial.printf("[mqtt] topic: %s\n", MQTT_TOPIC);
+  Serial.print("[relay] ");
+  Serial.println(uploadUrl);
+
+  wakeRelay();
+
   lastStatsAt = millis();
 }
 
+// ---------------------------------------------------------------------------
+// 7. Upload one frame
+// ---------------------------------------------------------------------------
+
+bool postFrame(const uint8_t *data, size_t len) {
+  HTTPClient http;
+  http.setConnectTimeout(10000);
+  http.setTimeout(15000);
+  http.setReuse(true);
+
+  if (!http.begin(tlsClient, uploadUrl)) {
+    Serial.println("[post] begin failed");
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/octet-stream");
+  http.addHeader("X-Device-Id", DEVICE_ID);
+  http.addHeader("X-Frame-Width", String(FRAME_W));
+  http.addHeader("X-Frame-Height", String(FRAME_H));
+  http.addHeader("X-Frame-Format", "rgb565le");
+
+  int code = http.POST(const_cast<uint8_t *>(data), len);
+  if (code <= 0) {
+    Serial.printf("[post] failed: %s\n", http.errorToString(code).c_str());
+  } else if (code != 200) {
+    Serial.printf("[post] server said HTTP %d\n", code);
+  }
+  http.end();
+
+  if (code != 200) {
+    // A stale keep-alive socket cannot be reused; drop it so the next attempt
+    // performs a clean handshake.
+    tlsClient.stop();
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// 8. Main loop
+// ---------------------------------------------------------------------------
+
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-    WiFi.reconnect();
-    delay(500);
-    return;
-  }
-
-  if (!mqtt.connected()) {
-    if (millis() - lastMqttAttemptAt >= 3000) {
-      lastMqttAttemptAt = millis();
-      reconnectMqtt();
+    if (millis() - lastReconnectAt > 3000) {
+      lastReconnectAt = millis();
+      Serial.println("[wifi] lost -> reconnecting");
+      WiFi.reconnect();
     }
-    delay(50);
+    delay(200);
     return;
   }
-
-  // Keep the MQTT session healthy (answers pings, notices a dead socket).
-  mqtt.loop();
 
   unsigned long now = millis();
 
   if (now - lastStatsAt >= 5000) {
     float seconds = (now - lastStatsAt) / 1000.0f;
-    Serial.printf("[stats] %.1f fps, %.0f KB/s, %u dropped\n",
+    Serial.printf("[stats] %.1f fps, %.0f KB/s, %u failed\n",
                   statsFrames / seconds,
                   (statsBytes / 1024.0f) / seconds,
-                  (unsigned)framesDropped);
+                  (unsigned)framesFailed);
     statsFrames = 0;
     statsBytes = 0;
     lastStatsAt = now;
@@ -233,39 +302,30 @@ void loop() {
 
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("[camera] frame capture failed");
+    Serial.println("[camera] capture failed");
     delay(100);
     return;
   }
 
-  if (fb->format != PIXFORMAT_JPEG || fb->len == 0) {
-    Serial.println("[camera] unexpected frame format");
+  if (fb->format != PIXFORMAT_RGB565 || fb->len < FRAME_BYTES) {
+    Serial.printf("[camera] unexpected frame: fmt=%d len=%u\n",
+                  (int)fb->format, (unsigned)fb->len);
     esp_camera_fb_return(fb);
     return;
   }
 
-  if (fb->len > mqtt.getBufferSize()) {
-    framesDropped++;
-    if (framesDropped % 20 == 1) {
-      Serial.printf("[camera] frame too large (%u bytes) - dropping\n", (unsigned)fb->len);
-    }
-    esp_camera_fb_return(fb);
-    return;
-  }
-
-  bool ok = mqtt.publish(MQTT_TOPIC, fb->buf, fb->len, false);
-  size_t frameLen = fb->len;
+  bool ok = postFrame(fb->buf, FRAME_BYTES);
   esp_camera_fb_return(fb);
 
   if (ok) {
     framesSent++;
     statsFrames++;
-    statsBytes += frameLen;
+    statsBytes += FRAME_BYTES;
     if (framesSent == 1) {
-      Serial.printf("[mqtt] streaming to %s\n", MQTT_TOPIC);
+      Serial.println("[post] first frame accepted by the relay");
     }
   } else {
-    Serial.println("[mqtt] publish failed - reconnecting");
-    mqtt.disconnect();
+    framesFailed++;
+    delay(200);   // brief backoff; keeps the log readable when the relay is down
   }
 }

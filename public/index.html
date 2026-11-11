@@ -14,7 +14,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/css/styles.css" />
-    <script src="/vendor/mqtt.min.js"></script>
+    <script src="/js/env.js"></script>
     <script type="module" src="/js/app.js"></script>
   </head>
   <body>
@@ -22,9 +22,26 @@
 
     <div class="bg-layer" aria-hidden="true">
       <div class="starfield" aria-hidden="true"></div>
+      <div class="constellation" aria-hidden="true"></div>
       <div class="nebula nebula-a" aria-hidden="true"></div>
       <div class="nebula nebula-b" aria-hidden="true"></div>
       <div class="nebula nebula-c" aria-hidden="true"></div>
+      <div class="nebula nebula-d" aria-hidden="true"></div>
+      <div class="aurora" aria-hidden="true"></div>
+
+      <div class="orbit-ring orbit-ring-a" aria-hidden="true">
+        <div class="orbit-planet orbit-planet-a" aria-hidden="true"></div>
+        <div class="orbit-planet orbit-planet-b" aria-hidden="true"></div>
+        <div class="orbit-planet orbit-planet-c" aria-hidden="true"></div>
+      </div>
+      <div class="orbit-ring orbit-ring-b" aria-hidden="true">
+        <div class="orbit-planet orbit-planet-a" aria-hidden="true"></div>
+        <div class="orbit-planet orbit-planet-b" aria-hidden="true"></div>
+        <div class="orbit-planet orbit-planet-c" aria-hidden="true"></div>
+      </div>
+
+      <div class="shooting-star" aria-hidden="true"></div>
+      <div class="shooting-star" aria-hidden="true"></div>
       <div class="shooting-star" aria-hidden="true"></div>
       <div class="shooting-star" aria-hidden="true"></div>
       <div class="shooting-star" aria-hidden="true"></div>
@@ -250,8 +267,7 @@
               <div class="stage-controls">
                 <div class="control-row">
                   <div class="mode-switch" role="group" aria-label="Transport">
-                    <button class="mode-btn is-active" data-mode="mqtt" type="button">MQTT</button>
-                    <button class="mode-btn" data-mode="ws" type="button">WebSocket</button>
+                    <button class="mode-btn is-active" data-mode="ws" type="button">WebSocket</button>
                     <button class="mode-btn" data-mode="webrtc" type="button">WebRTC</button>
                     <button class="mode-btn" data-mode="mjpeg" type="button">MJPEG</button>
                     <button class="mode-btn" data-mode="poll" type="button">HTTP</button>

@@ -50,9 +50,10 @@ export const config = {
   jpegQuality: Math.min(95, Math.max(40, int(process.env.JPEG_QUALITY, 80))),
   defaultWidth: int(process.env.FRAME_WIDTH, 320),
   defaultHeight: int(process.env.FRAME_HEIGHT, 240),
-  // OV2640 / RHYX-M21-45 normally emits RGB565 high-byte-first. Firmware can
-  // still override this per request with ?format=rgb565be|rgb565le.
-  defaultFormat: process.env.FRAME_FORMAT || 'rgb565be',
+  // The ESP32 writes RGB565 pixels as native little-endian uint16 values, so
+  // the low byte comes first on the wire. Firmware can override per request
+  // with ?format=rgb565be|rgb565le|jpeg or an X-Frame-Format header.
+  defaultFormat: process.env.FRAME_FORMAT || 'rgb565le',
   maxFrameBytes: int(process.env.MAX_FRAME_BYTES, 2 * 1024 * 1024),
   frameStaleMs: int(process.env.FRAME_STALE_MS, 5000),
 

@@ -1,196 +1,179 @@
-# Live camera on the public website — exact setup
+# MIRSAD — live ESP32-CAM on the web, step by step
 
-**Website:** <https://livestream-lemon-omega.vercel.app/>
-
-The ESP32-CAM publishes **JPEG frames** to a public MQTT broker over TLS. The
-website subscribes to the same topic over a secure WebSocket (WSS) and paints
-the frames as they arrive. Video never passes through a Vercel function, so it
-keeps working no matter how many serverless instances Vercel starts — and it
-uses no Vercel invocations or bandwidth for the feed.
-
-```
-ESP32-CAM ──TLS 8883──► public.cloud.shiftr.io ◄──WSS 443── browser
-```
-
-No account, no public IP, no port forwarding, no token.
-
-> **Important:** the firmware currently on the camera is the old HTTP uploader
-> that posts to a dead tunnel (`Upload error: connection refused`). No website
-> change can fix that, so the sketch has to be flashed **once**. After that,
-> every power-on connects by itself.
-
----
-
-## 1. Flash the camera (one time, ~1 minute)
-
-### Easiest way — browser, no Arduino IDE
-
-1. Wire a USB-TTL adapter and put the board in boot mode:
-
-   | USB-TTL | ESP32-CAM |
-   | --- | --- |
-   | 5V | 5V |
-   | GND | GND |
-   | TX | U0RXD |
-   | RX | U0TXD |
-   | — | GPIO0 → GND |
-
-2. Press **RST**, then plug the adapter into the PC.
-3. Open <https://livestream-lemon-omega.vercel.app/flash.html> in **Chrome or Edge**.
-4. Click **Install firmware**, pick the `COM…` port, wait for *Installation complete*.
-5. Unplug `GPIO0` from `GND`, press **RST**.
-
-The prebuilt image in `public/firmware/` is already compiled and merged
-(`tools/build-firmware.ps1` regenerates it). The `NVS` partition is not touched,
-so the Wi-Fi the camera already saved keeps working.
-
-### Alternative — Arduino IDE
-
-Open this sketch in Arduino IDE:
-
-```
-C:\Users\Alshuruq Comapny\OneDrive\Desktop\CameraWebServer\CameraWebServer\CameraWebServer.ino
-```
-
-The repo contains the same firmware at:
-
-```
-firmware\esp32cam-wifimanager\esp32cam-wifimanager.ino   (WiFiManager portal)
-firmware\esp32cam-streamer\esp32cam-streamer.ino          (Wi-Fi compiled in)
-```
-
-### Arduino IDE settings
-
-| Setting | Value |
-| --- | --- |
-| Board | **AI Thinker ESP32-CAM** (or ESP32 Wrover Module) |
-| PSRAM | **Enabled** |
-| Partition Scheme | the sketch folder ships `partitions.csv`, so any scheme works (≥ 3 MB app) |
-| Upload speed | 115200 (or 460800 if stable) |
-
-### Libraries
-
-**Nothing to install.** `PubSubClient.h` / `PubSubClient.cpp` are inside the same
-sketch folder, and **WiFiManager** is already installed — the current firmware was
-built with it.
-
-If you ever move the sketch to a new computer, install **WiFiManager** by tzapu
-from *Tools → Manage Libraries*.
-
-### First boot
-
-1. Connect `GPIO0` to `GND`, press `RST`, click **Upload**.
-2. Remove `GPIO0` from `GND`, press `RST`, open the Serial Monitor at **115200**.
-3. The board reuses the Wi-Fi it already saved (no portal, no password typing).
-   You should see:
+The camera has no public IP, so it **pushes** frames out to a relay. The relay
+turns them into JPEG and hands them to every browser.
 
 ```text
-[boot] MIRSAD camera v2 (MQTT)
-[wifi] connected: 192.168.x.x
-[mqtt] connecting to public.cloud.shiftr.io:8883 ... connected
-[mqtt] topic: mirsad/live/a7f3c9e1d84b4f06b2a5
-[mqtt] streaming to mirsad/live/a7f3c9e1d84b4f06b2a5
-[stats] 15.0 fps, 118 KB/s, 0 dropped
+ESP32-CAM (RHYX-M21-45)                       Render (Node relay)                 Browser
+───────────────────────                       ───────────────────                 ───────
+320x240 RGB565, 153,600 B/frame   ──HTTPS──▶  POST /api/upload-frame   ──WSS──▶   /ws/frames
+5 fps by default                  POST       RGB565 → JPEG (jpeg-js)             MJPEG, HTTP poll
+saved Wi-Fi, no captive portal               /api/frame.jpg, /stream.mjpeg       filters, effects
 ```
 
-4. Open the website. The camera pill turns **LIVE** within a few seconds.
+No MQTT, no public broker, no port forwarding, no account on the camera side.
 
-> Only if the board has **no** saved Wi-Fi does it open the
-> `ESP32-CAM-Config` hotspot. Join it, choose your network, and it starts
-> streaming. Credentials are stored on the board afterwards.
+| Piece | Where it runs | What it does |
+| --- | --- | --- |
+| `public/` | **Vercel** (static) | the dashboard — visual only, no state |
+| `server/` | **Render** (Node) | ingests frames, encodes JPEG, broadcasts WS/MJPEG |
+| `firmware/esp32cam-wifimanager/` | ESP32-CAM | captures and POSTs raw RGB565 |
+| `tools/` | your PC | build, flash, simulate, verify |
+
+The browser needs to know one thing: the relay's URL. That is
+`public/js/env.js` → `window.MIRSAD_API_BASE`.
 
 ---
 
-## 2. What you should see on the website
+## Step 1 — Deploy the relay to Render  *(you do this, ~5 minutes)*
 
-- The live feed appears automatically after power-on.
-- Closing the tab and opening it again reconnects by itself.
-- If the camera loses power, the dashboard shows **Waiting for signal**.
-- Power the camera back on and the feed returns without refreshing the page.
-- The transport selector defaults to **MQTT**; WS/MJPEG/HTTP remain available
-  for the local Node relay.
+1. Open <https://render.com> → **Get Started** → sign up **with GitHub**.
+2. Authorise Render to read the repo
+   `github.com/TasneemHazem10/live-ESP32-cam-stream`.
+3. Click **New +** → **Blueprint**.
+4. Pick the repo → **Connect**. Render finds `render.yaml` by itself.
+5. Click **Apply** / **Create**. Wait until the badge says **Live** (2–3 min).
+6. Copy the URL at the top of the service page:
+
+   ```text
+   https://mirsad-live-xxxx.onrender.com
+   ```
+
+**Send that URL back** so it can be baked into the site and the firmware.
+
+Notes:
+
+- The free plan sleeps after ~15 minutes of no traffic. The camera posting every
+  200 ms keeps it awake; after a sleep the first request takes 30–60 s, which is
+  why the firmware pings `/healthz` before streaming.
+- `UPLOAD_TOKEN` is empty in `render.yaml` on purpose. Set it in
+  **Dashboard → Environment** later to lock the endpoint to your camera.
+
+### Check it without any hardware
+
+```powershell
+$env:SERVER_URL = "https://mirsad-live-xxxx.onrender.com"
+
+# the exact request the firmware makes (153,600-byte RGB565):
+node tools/esp-post-check.js
+
+# continuous synthetic stream, then open the site:
+$env:SERVER_URL = "https://mirsad-live-xxxx.onrender.com"; node tools/simulate-camera.js
+```
+
+`esp-post-check.js` prints `PASS` and eight colour bars when the upload path,
+byte order and JPEG encoding are all correct.
 
 ---
 
-## 3. Change the broker or topic (optional)
+## Step 2 — Point the website at the relay  *(one line)*
 
-Both sides must use the same values.
-
-**Firmware** (`CameraWebServer.ino`):
-
-```cpp
-const char *MQTT_HOST = "public.cloud.shiftr.io";
-const uint16_t MQTT_PORT = 8883;
-const char *MQTT_USER = "public";
-const char *MQTT_PASS = "public";
-const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
-```
-
-**Website** (`public/js/runtime.js`):
+Edit `public/js/env.js`:
 
 ```js
-export const BROKER = {
-  url: 'wss://public.cloud.shiftr.io',
-  topic: 'mirsad/live/a7f3c9e1d84b4f06b2a5',
-  username: 'public',
-  password: 'public',
-};
+window.MIRSAD_API_BASE = 'https://mirsad-live-xxxx.onrender.com';
 ```
 
-You can also override the site without rebuilding by adding query parameters:
+Commit + push, or test instantly without touching code by adding the parameter:
 
 ```text
-https://livestream-lemon-omega.vercel.app/?broker=wss://broker.hivemq.com:8884/mqtt&topic=mirsad/live/YOUR_TOPIC
+https://livestream-lemon-omega.vercel.app/?api=https://mirsad-live-xxxx.onrender.com
 ```
 
-> The public broker is a shared demo service. Use a long random topic and do
-> not send anything private.
+`https://livestream-lemon-omega.vercel.app/` alone (no `?api=`) talks to its own
+origin, which has no relay — it will sit on "waiting for camera".
 
 ---
 
-## 4. Test without hardware
+## Step 3 — Flash the camera  *(one time)*
 
-Publish synthetic frames from a computer:
+`SERVER_HOST` in the sketch must be the Render host **without** `https://`:
 
-```powershell
-cd "C:\Users\Alshuruq Comapny\OneDrive\Desktop\task_1"
-npm install
-npm run sim:mqtt
+```cpp
+#define SERVER_HOST "mirsad-live-xxxx.onrender.com"
 ```
 
-The website should switch to **LIVE** and show a moving colour pattern.
-Press `Ctrl+C` to stop the simulator; the dashboard returns to
-**Waiting for signal**.
+Then either:
+
+**A. Browser (no Arduino IDE)** — serve the prebuilt image:
+
+```powershell
+powershell -File tools/build-firmware.ps1   # compiles + fills public/firmware/
+```
+
+Commit + push, open `https://livestream-lemon-omega.vercel.app/flash.html` in
+Chrome/Edge on the computer with the USB-TTL adapter, press **Install firmware**.
+
+Wiring — `5V→5V`, `GND→GND`, `TX→U0RXD`, `RX→U0TXD`, `GPIO0→GND`, tap `RST`.
+
+**B. Arduino IDE** — open `firmware/esp32cam-wifimanager/esp32cam-wifimanager.ino`,
+board **AI Thinker ESP32-CAM**, **PSRAM: Enabled**, then Upload.
+
+When it finishes: remove `GPIO0` from `GND`, tap `RST`.
+
+The Wi-Fi already stored on the board is kept, so there is no captive portal and
+no password to type.
 
 ---
 
-## 5. Local Node relay (optional)
+## Step 4 — Confirm it works
 
-The original server still works for LAN use and accepts raw RGB565 uploads:
+Serial Monitor at `115200`:
 
-```powershell
-cd "C:\Users\Alshuruq Comapny\OneDrive\Desktop\task_1"
-copy .env.example .env
-npm install
-npm start
+```text
+[boot] MIRSAD camera v3 (HTTP RGB565)
+[wifi] connected: 192.168.1.24
+[relay] https://mirsad-live-xxxx.onrender.com:443/api/upload-frame?w=320&h=240&format=rgb565le&device=ESP32-CAM-RHYX
+[relay] awake (HTTP 200)
+[post] first frame accepted by the relay
+[stats] 4.8 fps, 720 KB/s, 0 failed
 ```
 
-Open <http://localhost:3000>. Use the **WS**, **MJPEG** or **HTTP** transport
-buttons there. The firmware in this guide publishes over MQTT, so it does not
-upload to the local relay; the old HTTP upload endpoint remains for other
-clients and simulators.
+Then open the dashboard. `https://…/api/status` shows the truth:
+
+```json
+"camera": { "connected": true, "source": "live", "fps": 4.8, "width": 320, "height": 240 }
+```
+
+---
+
+## Data cost (important on a MiFi)
+
+Raw RGB565 is 153,600 bytes per frame — about 20× a JPEG.
+
+| `TARGET_FPS` | Upload | Per hour |
+| --- | --- | --- |
+| 2 | 300 KB/s | ~1.1 GB |
+| 5 (default) | 750 KB/s | ~2.7 GB |
+| 10 | 1.5 MB/s | ~5.4 GB |
+
+Change `TARGET_FPS` in the sketch and re-flash if that is too much. The relay
+also accepts hardware JPEG (`?format=jpeg`) at ~8 KB/frame if the module turns
+out to support it.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| Serial still shows `Upload error: connection refused` | The board is still running the old firmware. Flash `CameraWebServer.ino` again. |
-| `[mqtt] failed (rc=-2)` | Broker unreachable: check Wi-Fi, or try `broker.hivemq.com:8883`. |
-| `[mqtt] failed (rc=4/5)` | Wrong broker user/password (`public` / `public` on Shiftr). |
-| Serial shows `frame too large` | Lower `JPEG_QUALITY` (e.g. 18) or raise `MQTT_BUFFER_BYTES` if PSRAM allows. |
-| `[camera] init failed 0x105` | Reseat the camera ribbon cable and set PSRAM = **Enabled**. |
-| Site says **Waiting for signal** | Serial must print `[stats] ... fps`. Topic must match on both sides. |
-| Site says **MQTT broker unreachable** | The browser cannot reach the WSS URL; it falls back to HTTP polling. Try `?broker=wss://broker.hivemq.com:8884/mqtt`. |
-| Feed is 1–2 fps | Weak Wi-Fi or thin 5 V supply. Move the camera closer to the router, lower `TARGET_FPS`. |
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `[post] failed: connection refused` / `-1` | wrong `SERVER_HOST`, or the Render service is asleep | check the host, wait 60 s, reload `/healthz` in a browser |
+| `[post] server said HTTP 404` | path changed | must be `POST /api/upload-frame` |
+| `[post] server said HTTP 401` | `UPLOAD_TOKEN` set on Render but not in the sketch | set the same token in the sketch, or clear it in Render |
+| Site says "waiting" but `/api/status` shows fps | browser pointed at the wrong relay | set `window.MIRSAD_API_BASE` or use `?api=` |
+| Image is blue where it should be red | byte order | send `?format=rgb565be` instead of `rgb565le` |
+| Picture is a slideshow | RGB565 is large; TLS upload dominates | lower resolution or use JPEG mode |
+| WebSocket never connects, HTTP works | a proxy in front of the relay buffers WS | the dashboard falls back to polling automatically |
+| `Upload error: connection refused` in the log | still the **old** firmware | flash v3 — see `[boot] MIRSAD camera v3` |
+
+---
+
+## Optional, later
+
+- **Upload token** — Render → Environment → `UPLOAD_TOKEN`, same string in the
+  sketch. Rebuild and re-flash.
+- **WebRTC** — the relay already exposes `/api/rtc/offer` (werift, data channel).
+  Add `METERED_DOMAIN` + `METERED_API_KEY` in Render → Environment so browsers
+  behind symmetric NAT get TURN. No firmware change.
+- **Sensors** — `firmware/esp32-sensor-node` POSTs JSON to `/api/sensors`;
+  `node tools/simulate-sensors.js` fakes it.

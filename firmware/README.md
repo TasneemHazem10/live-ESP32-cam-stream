@@ -1,20 +1,23 @@
 # MIRSAD firmware guide
 
-Three independent Arduino sketches:
+Two Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **JPEG** at **15 fps** and publish to MQTT; reuses the saved Wi-Fi, portal only if none is stored |
-| [`esp32cam-streamer/esp32cam-streamer.ino`](esp32cam-streamer/esp32cam-streamer.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Same, but Wi-Fi SSID/password hard-coded |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **raw RGB565** at 5 fps and POST it to the relay; reuses the saved Wi-Fi, portal only if none is stored |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
-The camera sketches publish to `public.cloud.shiftr.io` and the public website subscribes to the
-same topic, so the video path is camera → broker → browser. Both boards only make **outbound**
-connections. Do not port-forward anything and do not give either board a public IP.
+Both boards only make **outbound** connections — no public IP, no port forwarding, no broker
+account. The camera POSTs frames to the relay on Render, which encodes them to JPEG and pushes
+them to the dashboard:
 
-> The relay accepts `X-Upload-Token` (these sketches) and `X-Api-Key` (original FieldEye
-> sketches), plus `Authorization: Bearer ...`, `?token=` and `?apiKey=`. For the complete
-> deployment walkthrough for this exact project, see [`../LIVE-SETUP.md`](../LIVE-SETUP.md).
+```text
+ESP32-CAM  --HTTPS POST /api/upload-frame-->  Render relay  --WSS /ws/frames-->  browser
+```
+
+> The relay accepts `X-Upload-Token` and `X-Api-Key`, plus `Authorization: Bearer ...`,
+> `?token=` and `?apiKey=`. For the complete deployment walkthrough for this exact project, see
+> [`../LIVE-SETUP.md`](../LIVE-SETUP.md).
 
 ---
 
@@ -26,21 +29,15 @@ connections. Do not port-forward anything and do not give either board a public 
    https://espressif.github.io/arduino-esp32/package_esp32_index.json
    ```
 3. Open **Tools → Board → Boards Manager**, search for **esp32**, and install
-   **ESP32 by Espressif Systems** (2.0.x or 3.x).
+   **ESP32 by Espressif Systems** (3.x recommended; 2.0.x also compiles).
 4. Install the libraries used by the sensor node via **Tools → Manage Libraries**:
    - **DHT sensor library** by Adafruit
    - **Adafruit Unified Sensor**
    - **Adafruit BMP280** (only if you enable pressure)
-5. Install **WiFiManager** by tzapu if you use the `esp32cam-wifimanager` sketch.
-   (The copy under `../CameraWebServer/CameraWebServer/` needs nothing extra:
-   `PubSubClient.h`/`.cpp` and `partitions.csv` ship in that folder.)
-6. **PubSubClient** by Nick O'Leary is not needed for `esp32cam-wifimanager` or the
-   Desktop sketch — both bundle `PubSubClient.h`/`.cpp` and `partitions.csv`. Install it only
-   for `esp32cam-streamer`.
-7. Select the correct port under **Tools → Port**.
-
-The camera sketches need the ESP32 board package (`esp_camera.h` is bundled) and WiFiManager;
-`esp32cam-streamer` also needs PubSubClient.
+5. Install **WiFiManager** by tzapu — the camera sketch needs it. Everything else
+   (`esp_camera.h`, `HTTPClient`, `WiFiClientSecure`) ships with the ESP32 core, so no MQTT
+   library and no bundled `PubSubClient` files are required.
+6. Select the correct port under **Tools → Port**.
 
 ---
 
@@ -81,57 +78,57 @@ facing the board and check the 5 V supply.
 
 ### Camera settings to edit
 
-**Recommended: `esp32cam-wifimanager` (MQTT, saved Wi-Fi)**
-
-The board keeps the Wi-Fi credentials already stored on it, so re-flashing does not ask for the
-password again.
+There is exactly one line to change before flashing: the relay host.
 
 ```cpp
-const char *MQTT_HOST = "public.cloud.shiftr.io";
-const uint16_t MQTT_PORT = 8883;
-const char *MQTT_USER = "public";
-const char *MQTT_PASS = "public";
-const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";   // match runtime.js
-const char *DEVICE_ID = "ESP32-CAM-01";
-const int TARGET_FPS = 15;
-const int JPEG_QUALITY = 16;            // smaller number = sharper, bigger frame
-const size_t MQTT_BUFFER_BYTES = 24576; // must hold one whole JPEG
+#define SERVER_HOST "mirsad-live-xxxx.onrender.com"   // Render host, no https://
+#define SERVER_PORT 443
+#define UPLOAD_PATH "/api/upload-frame"
+#define UPLOAD_TOKEN ""        // leave empty unless UPLOAD_TOKEN is set on Render
+#define DEVICE_ID "ESP32-CAM-RHYX"
+#define TARGET_FPS 5           // raw RGB565 is heavy — see bandwidth below
 ```
+
+Frame geometry is fixed by the handover spec and must not be changed:
+
+```cpp
+#define FRAME_W 320
+#define FRAME_H 240
+#define FRAME_BYTES (FRAME_W * FRAME_H * 2)   // 153,600 bytes/frame
+```
+
+The sketch configures the sensor as `PIXFORMAT_RGB565` / `FRAMESIZE_QVGA` and uploads the raw
+buffer as `application/octet-stream` with `?w=320&h=240&format=rgb565le`. The relay does the
+RGB565 → JPEG conversion, because the RHYX-M21-45 has no hardware JPEG encoder.
 
 First boot:
 
 1. Flash the sketch, remove `GPIO0` from `GND`, press **RST**, open Serial Monitor at 115200.
 2. The board prints `[wifi] connected: 192.168.x.x` using its stored credentials.
-3. It then prints `[mqtt] connected` and starts streaming; the website goes **LIVE** by itself.
-4. Only if no network is stored does the **`ESP32-CAM-Config`** hotspot appear. Join it, choose
+3. It pings the relay (`[relay] awake (HTTP 200)`) — Render's free tier may take up to a minute
+   to wake up, which is why this happens before streaming.
+4. `[post] first frame accepted by the relay` means the dashboard goes **LIVE**.
+5. Only if no network is stored does the **`ESP32-CAM-Config`** hotspot appear. Join it, choose
    your Wi-Fi, and the board starts streaming. Credentials survive reboots.
 
 The portal uses a **180-second timeout**; if it expires, the board restarts and tries again.
 To force it later, erase the Wi-Fi settings (**Tools → Erase Flash → All Flash Contents**).
 
-**Alternative: `esp32cam-streamer` (hard-coded Wi-Fi)**
-
-```cpp
-const char *WIFI_SSID = "YOUR_WIFI_NAME";
-const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char *MQTT_HOST = "public.cloud.shiftr.io";
-const uint16_t MQTT_PORT = 8883;
-const char *MQTT_USER = "public";
-const char *MQTT_PASS = "public";
-const char *MQTT_TOPIC = "mirsad/live/a7f3c9e1d84b4f06b2a5";
-const char *DEVICE_ID = "ESP32-CAM-01";
-const int TARGET_FPS = 15;
-const int JPEG_QUALITY = 16;
-```
-
 ### Bandwidth and frame rate
 
-Frames are **JPEG** (not raw RGB565), about 6–9 KB each at QVGA / quality 16. At 15 fps that is
-roughly **120 KB/s (1 Mbit/s)** of upload after TLS overhead — tested loss-free on Shiftr. If the
-picture stutters, raise `JPEG_QUALITY` (18 makes bigger frames with lower quality), lower
-`TARGET_FPS`, or move the board closer to the access point.
+Raw RGB565 is 153,600 bytes per frame — roughly 20× a JPEG. At the default 5 fps that is about
+**750 KB/s (2.7 GB per hour)** of upload, so watch the data plan.
 
-The camera LED is not used by these sketches.
+| `TARGET_FPS` | Upload | Per hour |
+| --- | --- | --- |
+| 2 | 300 KB/s | ~1.1 GB |
+| 5 (default) | 750 KB/s | ~2.7 GB |
+| 10 | 1.5 MB/s | ~5.4 GB |
+
+Lower `TARGET_FPS` and re-flash if that is too much. The relay also accepts hardware JPEG
+(`?format=jpeg`, ~8 KB/frame) if a module with a JPEG encoder is fitted later.
+
+The camera LED is not used by this sketch.
 
 ---
 
@@ -244,7 +241,7 @@ curl https://YOUR-SERVICE.onrender.com/api/sensors/devices
    configured, the TURN pill reads `TURN`; otherwise `STUN`.
 
 If the badge stays on `OFF`, the board is not reaching the relay. Open the Serial Monitor at
-115200 and confirm the `[relay]` URL and the `[upload] ... ok` lines.
+115200 and confirm the `[relay]` URL and the `[post] first frame accepted` lines.
 
 ---
 
@@ -254,15 +251,18 @@ If the badge stays on `OFF`, the board is not reaching the relay. Open the Seria
 
 | Symptom | Fix |
 | --- | --- |
-| `[camera] init failed 0x105` | Camera not detected; reseat the ribbon cable, check 5 V and PSRAM setting |
-| `[mqtt] failed (rc=-2)` | Cannot open the TLS socket: no internet, or the network blocks port 8883 |
-| `[mqtt] failed (rc=4/5)` | Broker rejected the login; use `public` / `public` on Shiftr |
-| `[mqtt] publish failed` | Frame bigger than the buffer or link dropped; raise `MQTT_BUFFER_BYTES`, lower `JPEG_QUALITY` |
+| `[camera] init failed 0x105` | Camera not detected; reseat the ribbon cable, check 5 V and the PSRAM setting |
+| `[post] failed: connection refused` | Wrong `SERVER_HOST`, or the Render service is still asleep — open `/healthz` in a browser and wait 60 s |
+| `[post] server said HTTP 404` | `UPLOAD_PATH` must be `/api/upload-frame` |
+| `[post] server said HTTP 401` | `UPLOAD_TOKEN` is set on Render but not in the sketch |
+| `[post] server said HTTP 413` | Frame body larger than `MAX_FRAME_BYTES`; keep 320×240 RGB565 |
+| `[relay] not ready yet (HTTP -1)` | TLS handshake failed — usually no internet, or a captive portal blocked it |
+| `[camera] unexpected frame: fmt=…` | Sensor did not enter RGB565/QVGA mode; check `pixel_format` and `frame_size` |
 | Random resets | Weak 5 V supply; shorten wires, add a 470–1000 µF capacitor near 5 V/GND |
-| Image is dark | Increase `set_brightness` slightly, or add light; the OV2640 needs decent illumination |
-| Very low FPS | Reduce `TARGET_FPS`, move closer to the router, use the external antenna if present |
+| Image is dark | Add light; the OV2640 needs decent illumination, or raise `set_brightness` |
+| Very low FPS | Raw RGB565 is large — lower `TARGET_FPS`, move closer to the router |
 | `ESP32-CAM-Config` portal never appears | Board already has saved Wi-Fi credentials — that is normal |
-| Serial shows `Upload error: connection refused` | Old HTTP firmware is still flashed; flash the MQTT sketch |
+| Serial shows `ESP32-CAM-Confiq` / `Upload error: connection refused` | Old firmware is still flashed; flash v3 — the log must start with `[boot] MIRSAD camera v3 (HTTP RGB565)` |
 
 ### Sensor node
 
@@ -278,10 +278,12 @@ If the badge stays on `OFF`, the board is not reaching the relay. Open the Seria
 
 ### Colour order reference
 
-| Setting | Query string | When |
-| --- | --- | --- |
-| `USE_RGB565_BIG_ENDIAN = true` | `format=rgb565be` | Default for OV2640 / RHYX-M21-45 |
-| `USE_RGB565_BIG_ENDIAN = false` | `format=rgb565le` | Swap if red/blue channels look reversed |
+The sketch sends little-endian RGB565 and asks the relay for the same:
+
+| Query string | When |
+| --- | --- |
+| `format=rgb565le` | Default — what the ESP32 writes as a native `uint16_t` |
+| `format=rgb565be` | Only if the picture shows red where it should be blue |
 
 The server's `FRAME_FORMAT` environment variable is only a fallback; the firmware query string
-always wins.
+always wins. `node tools/esp-post-check.js` proves the colour order without any hardware.

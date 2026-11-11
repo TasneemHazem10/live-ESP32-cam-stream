@@ -75,10 +75,11 @@
       <a href="/">live page</a> — it connects on its own.</p>
 
     <p class="note">Successful flash — open Serial Monitor at <code>115200</code> and you should see
-      <code>[boot] MIRSAD camera v2 (MQTT)</code>, then <code>[mqtt] connected</code>.
-      If you still see <code>[boot] MIRSAD camera v2 (MQTT)</code> missing, the flash did not take.</p>
+      <code>[boot] MIRSAD camera v3 (HTTP RGB565)</code>, then
+      <code>[post] first frame accepted by the relay</code>.
+      If the first line still names v2 or MQTT, the flash did not take.</p>
 
-    <footer>MIRSAD · ESP32-CAM firmware v2 (MQTT)</footer>
+    <footer>MIRSAD · ESP32-CAM firmware v3 (HTTP RGB565)</footer>
   </main>
 </body>
 </html>

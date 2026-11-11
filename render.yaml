@@ -25,7 +25,7 @@ services:
       - key: FRAME_HEIGHT
         value: "240"
       - key: FRAME_FORMAT
-        value: rgb565be
+        value: rgb565le
       - key: MAX_FRAME_BYTES
         value: "2097152"
       - key: FRAME_STALE_MS
@@ -36,9 +36,10 @@ services:
         value: "*"
       - key: TRUST_PROXY
         value: "true"
-      # Render generates a random token. Copy it into the ESP32 sketch as
-      # UPLOAD_TOKEN so only your camera can post frames.
+      # No upload token for now: the ESP32 posts to an obscure path and a token
+      # would have to be baked into every firmware build. Set UPLOAD_TOKEN in the
+      # Render dashboard later to lock the endpoint to your camera.
       - key: UPLOAD_TOKEN
-        generateValue: true
+        value: ""
       # TURN (Metered) is optional. Add METERED_DOMAIN, METERED_API_KEY and
       # METERED_REGION later in Dashboard → Environment if you need TURN.

@@ -1,18 +1,13 @@
 const params = new URLSearchParams(window.location.search);
-const configured = params.get('api') || window.API_BASE || '';
+
+// The relay (Render) is the only source of frames: the ESP32-CAM POSTs raw
+// RGB565 buffers to /api/upload-frame there, the relay JPEG-encodes them and
+// pushes them to browsers over /ws/frames. When the dashboard is served by the
+// relay itself an empty base means "same origin"; when it is served from Vercel
+// the base points at Render. Override per session with ?api=…
+const configured = params.get('api') || window.MIRSAD_API_BASE || window.API_BASE || '';
 
 export const API_BASE = String(configured).replace(/\/+$/, '');
-
-// The ESP32-CAM publishes JPEG frames to a public MQTT broker. Browsers receive
-// them over a WebSocket (WSS on port 443), so the live feed does not depend on
-// any single serverless instance. Override with ?broker=&topic= or by setting
-// window.MIRSAD_BROKER_* before the module loads.
-export const BROKER = {
-  url: params.get('broker') || window.MIRSAD_BROKER_URL || 'wss://public.cloud.shiftr.io',
-  topic: params.get('topic') || window.MIRSAD_BROKER_TOPIC || 'mirsad/live/a7f3c9e1d84b4f06b2a5',
-  username: params.get('brokerUser') || window.MIRSAD_BROKER_USER || 'public',
-  password: params.get('brokerPass') || window.MIRSAD_BROKER_PASS || 'public',
-};
 
 export function api(path) {
   return `${API_BASE}${path}`;

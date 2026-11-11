@@ -12,8 +12,8 @@ const $ = (id) => document.getElementById(id);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const MODE_IDS = ['mqtt', 'ws', 'webrtc', 'mjpeg', 'poll', 'livekit'];
-const MODE_LABELS = { mqtt: 'MQTT', ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT' };
+const MODE_IDS = ['ws', 'webrtc', 'mjpeg', 'poll', 'livekit'];
+const MODE_LABELS = { ws: 'WS', webrtc: 'WEBRTC', mjpeg: 'MJPEG', poll: 'HTTP', livekit: 'LIVEKIT' };
 const SENSOR_STALE_MS = 12_000;
 
 // Only the machine that runs the relay (opened as localhost) owns the camera.
@@ -443,19 +443,6 @@ const stream = new LiveStream({
     if (state.mode === 'webrtc') {
       showToast(t('toast.webrtcFail'), 'error');
       startMode('ws', { announce: false });
-      return;
-    }
-    if (error.code === 'mqtt_no_frames') {
-      // Broker is fine, camera is simply off. Keep the subscription open so the
-      // feed appears by itself when the ESP32 is powered on.
-      if (state.mode === 'mqtt') showToast(t('toast.mqttWaiting'), 'warn', 6000);
-      return;
-    }
-    if (error.code === 'mqtt_unavailable' || error.code === 'mqtt_failed') {
-      if (state.mode === 'mqtt') {
-        showToast(t('toast.mqttFallback'), 'warn');
-        startMode('poll', { announce: false });
-      }
       return;
     }
     if (error.code === 'ws_failed' || error.code === 'ws_no_frames') {
@@ -1326,7 +1313,7 @@ function setupStars() {
   const field = document.querySelector('.starfield');
   if (!field) return;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const count = reduced ? 60 : 180;
+  const count = reduced ? 60 : 220;
   const width = field.clientWidth || window.innerWidth;
   const height = field.clientHeight || window.innerHeight;
 
@@ -1334,22 +1321,65 @@ function setupStars() {
   for (let i = 0; i < count; i++) {
     const star = document.createElement('span');
     star.className = 'star' + (reduced ? '' : ' twinkle');
-    const size = Math.random() * 2 + 0.5;
+
+    // Varied star sizes and classes for visual depth
+    const roll = Math.random();
+    if (roll > 0.92) {
+      star.classList.add('giant');
+    } else if (roll > 0.78) {
+      star.classList.add('large');
+    } else if (roll > 0.6) {
+      star.classList.add('small');
+    }
+
+    const size = roll > 0.92 ? 4 : roll > 0.78 ? 3 : roll > 0.6 ? 2 : Math.random() * 1.5 + 0.5;
     const x = Math.random() * width;
     const y = Math.random() * height;
     const opacity = Math.random() * 0.7 + 0.15;
+
     star.style.width = size + 'px';
     star.style.height = size + 'px';
     star.style.left = x + 'px';
     star.style.top = y + 'px';
     star.style.opacity = opacity;
     if (!reduced) {
-      star.style.setProperty('--dur', (2 + Math.random() * 5) + 's');
-      star.style.animationDelay = (Math.random() * 5) + 's';
+      star.style.setProperty('--dur', (2 + Math.random() * 6) + 's');
+      star.style.animationDelay = (Math.random() * 6) + 's';
     }
     frag.appendChild(star);
   }
   field.appendChild(frag);
+}
+
+function setupDust() {
+  const layer = document.querySelector('.bg-layer');
+  if (!layer) return;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const count = reduced ? 20 : 60;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < count; i++) {
+    const dust = document.createElement('span');
+    dust.className = 'dust-particle ' + (Math.random() > 0.5 ? 'small' : 'medium');
+
+    const x = Math.random() * width;
+    const y = Math.random() * height;
+    const opacity = Math.random() * 0.4 + 0.1;
+    const duration = 12 + Math.random() * 18;
+    const delay = Math.random() * 20;
+
+    dust.style.left = x + 'px';
+    dust.style.top = y + 'px';
+    dust.style.opacity = opacity;
+    if (!reduced) {
+      dust.style.animation = 'dust-float ' + duration + 's linear infinite';
+      dust.style.animationDelay = delay + 's';
+    }
+    frag.appendChild(dust);
+  }
+  layer.appendChild(frag);
 }
 
 function setupClocks() {
@@ -1435,6 +1465,7 @@ setupScrollEffects();
 setupReveal();
 setupTilt();
 setupStars();
+setupDust();
 setupClocks();
 setupEndpoint();
 applySource('none');
@@ -1444,11 +1475,11 @@ updateCameraControls();
 loadSensorSnapshot();
 connectSensorSocket();
 refreshStatus();
-// The ESP32-CAM publishes JPEG frames directly to a public MQTT broker. The
-// browser subscribes over WSS, so the feed does not depend on which serverless
-// instance is handling requests. HTTP polling stays as a fallback for setups
-// where the broker is unreachable.
-const defaultMode = window.mqtt ? 'mqtt' : 'poll';
+// The relay receives raw RGB565 frames from the ESP32-CAM over
+// POST /api/upload-frame, encodes them to JPEG and pushes them to this page
+// over /ws/frames. WS is the low-latency default; HTTP polling stays as the
+// fallback when a proxy in front of the relay buffers WebSockets.
+const defaultMode = 'ws';
 startMode(defaultMode, { announce: false });
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
@@ -1463,10 +1494,8 @@ setInterval(() => {
   }
 }, 1000);
 
-// Pause sensor reconnects while the tab is hidden, resume on focus. The MQTT
-// subscription is paused too so a background tab does not download frames.
+// Pause sensor reconnects while the tab is hidden, resume on focus.
 document.addEventListener('visibilitychange', () => {
-  if (state.mode === 'mqtt') stream.setBrokerPaused(document.hidden);
   if (!document.hidden && (!sensorSocket || sensorSocket.readyState > WebSocket.OPEN)) {
     connectSensorSocket();
   }
