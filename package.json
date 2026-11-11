@@ -14,6 +14,7 @@
     "sim:sensors": "node tools/simulate-sensors.js",
     "test:ingest": "node tools/esp-post-check.js",
     "test:e2e": "node tools/e2e-check.js",
+    "test:prod": "node tools/prod-check.js",
     "test:ui": "node tools/ui-check.js",
     "test:webrtc": "node tools/webrtc-check.js"
   },
