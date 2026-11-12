@@ -175,7 +175,8 @@ followed by the JPEG bytes.
 On Render, WebRTC **requires** Metered TURN: the service has no public UDP port for ICE, so only
 relayed candidates can connect. Configure `METERED_DOMAIN` + `METERED_API_KEY` (see
 [Enable Metered TURN](#2-enable-metered-turn)); without them WebSocket remains the working
-transport and WebRTC mode falls back after 20 s.
+transport and WebRTC mode falls back after 20 s. The server peer prefers Metered's TCP/TLS relay
+(`turns:…:443?transport=tcp`) so the allocation does not depend on outbound UDP.
 
 ---
 

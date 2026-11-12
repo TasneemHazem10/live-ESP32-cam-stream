@@ -49,6 +49,8 @@ export async function getIceConfig({ force = false } = {}) {
 
       if (!iceServers.length) throw new Error('empty credential response');
       result = { iceServers, source: 'metered', turn: true };
+      const preferred = orderIceForServer(iceServers)[0]?.urls?.[0] || 'none';
+      console.log(`[webrtc] Metered TURN ready (${iceServers.length} entries, server uses ${preferred})`);
     } catch (error) {
       console.warn(`[webrtc] Metered TURN unavailable (${error.message}); using STUN`);
     }
@@ -92,6 +94,56 @@ function cleanupPeer(peer, reason = 'closed') {
   if (reason !== 'shutdown') {
     console.log(`[webrtc] peer ${peer.id.slice(0, 8)} closed (${reason}), sent=${peer.sent}`);
   }
+}
+
+/**
+ * Make the server peer's TURN allocation survivable on a PaaS.
+ *
+ * Render (like most container platforms) exposes no public UDP port and may
+ * block outbound UDP. Metered returns several TURN URLs for the same
+ * credentials; werift keeps only the first one it parses. Sort the list so a
+ * TCP/TLS relay is tried first, then collapse the TURN entries into one so any
+ * STUN entry cannot shadow them.
+ *
+ * Browsers receive the untouched list: they can use UDP, and the ordering is
+ * only a preference.
+ */
+function turnUrlRank(url) {
+  const value = String(url);
+  if (/^turns:[^?]*\?.*transport=tcp/i.test(value)) return 0;
+  if (/^turns:/i.test(value)) return 1;
+  if (/^turn:[^?]*\?.*transport=tcp/i.test(value)) return 2;
+  if (/^turn:/i.test(value)) return 3;
+  return 4;
+}
+
+export function orderIceForServer(iceServers) {
+  const turn = { urls: [], username: undefined, credential: undefined };
+  const stun = [];
+  const seen = new Set();
+
+  for (const entry of iceServers || []) {
+    const urls = Array.isArray(entry?.urls) ? entry.urls : [entry?.urls];
+    for (const url of urls) {
+      if (typeof url !== 'string' || seen.has(url)) continue;
+      if (/^turns?:/i.test(url)) {
+        seen.add(url);
+        turn.urls.push(url);
+        if (turn.username === undefined && entry.username) turn.username = entry.username;
+        if (turn.credential === undefined && entry.credential) turn.credential = entry.credential;
+      } else if (/^stuns?:/i.test(url)) {
+        seen.add(url);
+        stun.push(url);
+      }
+    }
+  }
+
+  if (!turn.urls.length) return iceServers || [];
+
+  turn.urls.sort((a, b) => turnUrlRank(a) - turnUrlRank(b));
+  const ordered = [{ ...turn, urls: turn.urls }];
+  for (const url of stun) ordered.push({ urls: url });
+  return ordered;
 }
 
 function sendFrame(peer, frame) {
@@ -162,7 +214,7 @@ export async function createWebRtcPeer(offer, meta = {}) {
 
   const { RTCPeerConnection } = await loadWerift();
   const ice = await getIceConfig();
-  const pc = new RTCPeerConnection({ iceServers: ice.iceServers });
+  const pc = new RTCPeerConnection({ iceServers: orderIceForServer(ice.iceServers) });
 
   const peer = {
     id: randomUUID(),

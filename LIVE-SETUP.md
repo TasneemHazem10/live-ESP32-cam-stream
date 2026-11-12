@@ -103,7 +103,10 @@ dashboard's WebRTC mode times out after 20 s and falls back to WebSocket.
 4. Save → Render restarts the service.
 
 The API key stays server-side: browsers call `GET /api/rtc/config`, and the
-relay returns short-lived TURN credentials. Verify:
+relay returns short-lived TURN credentials. The server-side peer reorders those
+credentials to prefer Metered's TCP/TLS relay (`turns:…:443?transport=tcp`)
+over UDP, because a container host cannot rely on outbound UDP; the browser
+still receives the original list. Verify:
 
 ```powershell
 curl.exe -sS https://live-esp32-cam-stream.onrender.com/api/status
@@ -114,7 +117,12 @@ curl.exe -sS https://live-esp32-cam-stream.onrender.com/api/rtc/config
 ```
 
 `iceSource: "stun"` means the variables are missing or Metered rejected the key
-(the relay logs `[webrtc] Metered TURN unavailable (…)`).
+(the relay logs `[webrtc] Metered TURN unavailable (…)`). When it works, the
+Render log shows the URL the server peer will use:
+
+```text
+[webrtc] Metered TURN ready (5 entries, server uses turns:global.relay.metered.ca:443?transport=tcp)
+```
 
 Transport selection is automatic: the dashboard tries the configured mode
 (default **WebSocket**) and falls back to the next one if frames do not arrive.
