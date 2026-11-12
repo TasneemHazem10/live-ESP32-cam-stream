@@ -1,5 +1,5 @@
-import jpeg from 'jpeg-js';
 import { config } from './config.js';
+import { encodeJpeg } from './encoder.js';
 import { rgb565ToRgba } from './rgb565.js';
 
 const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
@@ -25,6 +25,7 @@ export class FrameHub {
     this.subscribers = new Set();
     this.rgba = null;
     this.demoTimer = null;
+    this.demoBusy = false;
     this.demoTime = 0;
     this.demoWidth = config.defaultWidth;
     this.demoHeight = config.defaultHeight;
@@ -34,7 +35,11 @@ export class FrameHub {
   start() {
     if (!config.demoFallback || this.demoTimer) return;
     const interval = Math.max(60, Math.round(1000 / config.demoFps));
-    this.demoTimer = setInterval(() => this.renderDemoIfNeeded(), interval);
+    this.demoTimer = setInterval(() => {
+      this.renderDemoIfNeeded().catch((error) => {
+        console.warn(`[frameHub] demo render failed: ${error.message}`);
+      });
+    }, interval);
     this.demoTimer.unref?.();
   }
 
@@ -151,7 +156,7 @@ export class FrameHub {
     return this.publish(jpegBuffer, meta);
   }
 
-  ingestRgb565(raw, options = {}) {
+  async ingestRgb565(raw, options = {}) {
     const width = Number(options.width) || config.defaultWidth;
     const height = Number(options.height) || config.defaultHeight;
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 16 || height < 16) {
@@ -174,12 +179,9 @@ export class FrameHub {
       rgba: this.rgba,
     });
 
-    const encoded = jpeg.encode(
-      { data: rgba, width, height },
-      config.jpegQuality,
-    );
+    const jpegBuffer = await encodeJpeg(rgba, width, height, config.jpegQuality);
 
-    return this.publish(encoded.data, {
+    return this.publish(jpegBuffer, {
       width,
       height,
       source: options.source || 'live',
@@ -237,11 +239,14 @@ export class FrameHub {
     };
   }
 
-  renderDemoIfNeeded() {
+  async renderDemoIfNeeded() {
     if (!config.demoFallback) return;
     // Once a real camera has been seen, never fall back to synthetic frames.
     if (this.sawRealFrame) return;
     if (Date.now() - this.lastRealAt < 4000) return;
+    // Encoding is async now; skip a tick instead of stacking renders.
+    if (this.demoBusy) return;
+    this.demoBusy = true;
 
     const width = this.demoWidth;
     const height = this.demoHeight;
@@ -346,8 +351,12 @@ export class FrameHub {
       }
     }
 
-    const encoded = jpeg.encode({ data, width, height }, Math.max(55, config.jpegQuality - 12));
-    this.publish(encoded.data, { width, height, source: 'demo', deviceId: 'SIMULATED-CAM' });
+    try {
+      const jpegBuffer = await encodeJpeg(data, width, height, Math.max(55, config.jpegQuality - 12));
+      this.publish(jpegBuffer, { width, height, source: 'demo', deviceId: 'SIMULATED-CAM' });
+    } finally {
+      this.demoBusy = false;
+    }
   }
 }
 

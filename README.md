@@ -6,7 +6,8 @@ MIRSAD accepts raw **RGB565** frames from an ESP32-CAM (RHYX-M21-45 / AI-Thinker
 `POST /api/upload-frame`, converts them to JPEG on the Node relay and fans them out to the browser
 over **WebSocket**, **MJPEG**, **HTTP polling** or a **WebRTC data channel**. The camera only makes
 outbound connections: it needs **no public IP, no port forwarding and no NAT traversal**, and the
-video never passes through Vercel's serverless functions.
+same Render process serves both the dashboard and the API, so there is no separate static host,
+no CORS hop and no serverless instance in the video path.
 
 Because the relay keeps the latest frame in memory, it must run on a single long-lived instance —
 Render, Railway, Docker or the laptop. LiveKit Cloud and Metered TURN remain available for WebRTC.
@@ -34,11 +35,10 @@ two seconds and switches to real readings automatically on the first ESP32 packe
 - [Configuration](#configuration)
 - [Tests](#tests)
 - [Deployment](#deployment)
-  - [1. Run the relay on the laptop](#1-run-the-relay-on-the-laptop)
-  - [2. LiveKit Cloud remote video](#2-livekit-cloud-remote-video)
-  - [3. Enable Metered TURN](#3-enable-metered-turn)
-  - [4. Flash the ESP32 boards](#4-flash-the-esp32-boards)
-  - [Optional: GitHub Pages frontend](#optional-github-pages-frontend)
+  - [1. Deploy the relay + dashboard to Render](#1-deploy-the-relay--dashboard-to-render)
+  - [2. Enable Metered TURN](#2-enable-metered-turn)
+  - [3. Flash the ESP32 boards](#3-flash-the-esp32-boards)
+  - [Optional: run the relay on a laptop](#optional-run-the-relay-on-a-laptop)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
 - [Project layout](#project-layout)
@@ -340,10 +340,92 @@ node tools/ui-check.js http://localhost:3000
 
 ## Deployment
 
-There is no hosted relay to pay for. The laptop runs `npm start` (the same command used in
-development), and LiveKit Cloud carries the video to anyone outside the LAN.
+One Render web service is the whole deployment: it serves the dashboard, receives the ESP32-CAM
+uploads and fans frames out to browsers. There is no separate static host (no Vercel, no GitHub
+Pages) and no CORS hop.
 
-### 1. Run the relay on the laptop
+```text
+https://live-esp32-cam-stream.onrender.com
+```
+
+### 1. Deploy the relay + dashboard to Render
+
+1. Open <https://dashboard.render.com/> → **New +** → **Blueprint**.
+2. Select the repository and apply `render.yaml`. Render runs:
+
+   ```text
+   Build:  npm ci
+   Start:  npm start
+   Health: /healthz
+   ```
+
+3. Wait for **Live**, then open the service URL. The dashboard and `/api/status` come from the
+   same origin, so `public/js/env.js` stays empty (`window.MIRSAD_API_BASE = ''`).
+4. Push to `main` to redeploy. `autoDeployTrigger: commit` is already set.
+
+Checks after every deploy:
+
+```bash
+curl https://YOUR-SERVICE.onrender.com/healthz
+curl https://YOUR-SERVICE.onrender.com/api/status
+# config.jpegEncoder must be "sharp" — the fallback "jpeg-js" is far slower
+npm run test:prod            # headless Chrome proves the deployed page paints frames
+```
+
+Free plan: 0.1 vCPU and it sleeps after ~15 minutes without traffic. The camera pinging
+`/healthz` keeps it awake; the first request after a sleep can take 30–60 s.
+
+### 2. Enable Metered TURN
+
+TURN is only needed for the WebRTC transport when a viewer sits behind symmetric NAT or a
+corporate firewall. The camera upload never uses TURN.
+
+1. Create a free account at <https://www.metered.ca/> and add a TURN app.
+2. Copy the app **domain** (`mirsad.metered.live`) and the **API key**.
+3. Render → service → **Environment**:
+
+   ```env
+   METERED_DOMAIN=mirsad.metered.live
+   METERED_API_KEY=...        # server-side only
+   METERED_REGION=            # optional
+   ```
+
+4. Save (Render restarts), then verify:
+
+   ```bash
+   curl https://YOUR-SERVICE.onrender.com/api/rtc/config
+   # → "source":"metered", "turn":true, ICE servers include turns:...
+   ```
+
+Credentials are fetched server-side and cached for 30 minutes; the API key never reaches the
+browser. The dashboard's TURN pill switches from `STUN` to `TURN`. The test client works without
+a browser camera:
+
+```bash
+npm run test:webrtc
+```
+
+### 3. Flash the ESP32 boards
+
+Follow [`LIVE-SETUP.md`](LIVE-SETUP.md) for the camera and [`firmware/README.md`](firmware/README.md)
+for wiring. Set the Render host in the sketch (no scheme, no path):
+
+```cpp
+#define SERVER_HOST "live-esp32-cam-stream.onrender.com"
+```
+
+The relay appends `/api/upload-frame?w=320&h=240&format=rgb565le&device=…`. Prebuilt images are
+served at `/flash.html` (Chrome/Edge + a USB-TTL adapter), so the camera laptop does not need
+Arduino IDE. The sensor node posts JSON to `/api/sensors`; its `SERVER_URL` is the same host with
+`https://` and the `/api/sensors` path.
+
+After flashing, the dashboard source badge changes from `OFF` to `LIVE` on the first upload.
+Because a public hostname is always classified as **viewer**, opening the Render dashboard never
+prompts for a laptop camera — the ESP32-CAM stays the only publisher.
+
+### Optional: run the relay on a laptop
+
+Useful for LAN development before deploying:
 
 ```bash
 cp .env.example .env      # Windows: copy .env.example .env
@@ -351,114 +433,19 @@ npm install
 npm start
 ```
 
-Open **http://localhost:3000** on the laptop. The page starts the laptop camera automatically
-(allow the browser permission prompt), applies the selected vision effect, and shows the live
-sensor simulator with a `SIM` badge.
-
-**Only this laptop publishes video.** Other devices open the dashboard and act as viewers; they
-are never asked for camera access and the camera buttons are hidden. On the same Wi-Fi they can
-watch through the relay at `http://LAPTOP-LAN-IP:3000` using WebSocket, MJPEG or HTTP with no
-LiveKit account. Outside the LAN, use LiveKit (step 2) or a tunnel — but in that case keep the
-laptop's own dashboard open at **http://localhost:3000**, because a public tunnel URL is always
-watch-only.
-
-Useful environment values for this phase:
+Open `http://localhost:3000` on that laptop to publish its webcam; other devices on the same
+Wi-Fi are watch-only viewers and never open a camera. For viewers outside the LAN either deploy
+to Render (above) or configure LiveKit Cloud:
 
 ```env
-DEMO_FALLBACK=true          # live simulator until the ESP32 boards are connected
-DEMO_FPS=8
 LIVEKIT_URL=wss://YOUR-PROJECT.livekit.cloud
 LIVEKIT_API_KEY=APIxxxxxxxxxxxx
-LIVEKIT_API_SECRET=...      # server-side only, never sent to browsers
+LIVEKIT_API_SECRET=...      # server-side only
 LIVEKIT_ROOM=live
 ```
 
-`DEMO_FALLBACK=true` no longer means a fake camera: the laptop webcam is the real source. The
-simulator only fills the sensor cards, and it stops permanently after the first real ESP32 packet.
-
-> Browsers only allow `getUserMedia` in a **secure context**. That only affects the relay laptop:
-> `http://localhost` is secure, and only the laptop opens the camera. Phones on the same Wi-Fi can
-> watch at `http://192.168.x.x:3000` as viewers with no prompt. Use LiveKit for viewers outside the
-> LAN, or a free HTTPS tunnel (Cloudflare Tunnel / ngrok) if the relay itself must be public.
-
-### 2. LiveKit Cloud remote video
-
-1. Create a free project at **https://cloud.livekit.io/**.
-2. Open **Settings → Keys** and copy the **URL**, **API Key** and **API Secret** into `.env`.
-   The secret is shown only once; if it is lost, create a new key.
-3. Restart the relay. The startup banner should say
-   `LiveKit : wss://… · room "live"` and `/api/livekit/config` should return `"enabled": true`.
-4. **Publisher (laptop only):** the dashboard already shares the webcam. Keep that tab open; the
-   camera keeps publishing even if you switch the laptop's own preview to another transport.
-5. **Viewer (phone / another city):** open the dashboard on the viewer device, click **LiveKit**,
-   and the laptop's camera track is rendered into the same canvas with all effects. Viewers are
-   never prompted for camera access. Sensor packets are mirrored into the LiveKit data channel by
-   the server, so the cards stay live too.
-
-The server only signs short-lived join tokens (`/api/livekit/token`); the API secret never leaves
-the machine. If the secret is missing, the laptop camera still works locally and the LiveKit mode
-shows a clear "not configured" toast.
-
-### 3. Enable Metered TURN
-
-TURN is optional once LiveKit is in use; keep it for the direct browser WebRTC mode on mobile
-carriers and corporate Wi-Fi. The camera upload itself never needs TURN.
-
-1. Create a free account at **https://www.metered.ca/**.
-2. Open the **TURN** / **Open Relay** dashboard and create an app (for example `mirsad`).
-3. Copy the app **domain** (looks like `mirsad.metered.live`) and the **API key**.
-4. Add them to `.env`:
-   - `METERED_DOMAIN=mirsad.metered.live`
-   - `METERED_API_KEY=...` (keep secret)
-   - `METERED_REGION=` (optional, e.g. a region shown by Metered)
-5. Restart the relay.
-6. Verify:
-
-```bash
-curl http://localhost:3000/api/rtc/config
-# → "source":"metered", "turn":true, ICE servers include turns:...
-```
-
-The server fetches short-lived credentials from Metered and caches them for 30 minutes. The
-API key never reaches the browser. In the dashboard, the TURN pill switches from `STUN` to
-`TURN`.
-
-### 4. Flash the ESP32 boards
-
-Follow [`firmware/README.md`](firmware/README.md). Use the laptop's **LAN address** (not
-`localhost`) so the boards can reach the relay:
-
-```cpp
-const char *WIFI_SSID = "...";
-const char *WIFI_PASSWORD = "...";
-const char *SERVER_URL = "http://192.168.1.50:3000/api/upload-frame"; // camera
-const char *SERVER_URL = "http://192.168.1.50:3000/api/sensors";      // sensors
-const char *UPLOAD_TOKEN = "...";   // same value as .env, or empty
-```
-
-Find the laptop address with `ipconfig` (Windows) or `ipconfig getifaddr en0` (macOS). After the
-first camera frame arrives, the dashboard source badge changes from `OFF` to `LIVE` and the
-waiting panel disappears.
-
-To make the ESP32-CAM the only video source, close the laptop dashboard tab (or stop the relay
-publisher) once the board is posting; the relay always serves the newest frame, so two publishers
-would otherwise interleave. The sensor node needs no such step — the first real packet switches
-the cards to `LIVE` and stops the simulator permanently.
-
-### Optional: GitHub Pages frontend
-
-The relay already serves the frontend, so static hosting is only useful for a public dashboard
-that talks to a relay exposed through a tunnel:
-
-1. Publish the `public/` folder (for example with a GitHub Actions Pages workflow).
-2. Point it at the tunnel URL:
-   ```html
-   <meta name="mirsad-api-base" content="https://YOUR-TUNNEL.example.com" />
-   ```
-   or append `?api=https://YOUR-TUNNEL.example.com` to the Pages URL.
-3. Set `ALLOWED_ORIGINS` in `.env` to the Pages origin, for example
-   `https://YOUR_USER.github.io`.
-4. Restart. WebSocket and API calls are automatically rewritten to the relay host.
+The server only signs short-lived join tokens (`/api/livekit/token`). If the secret is missing,
+the laptop camera still works locally and LiveKit mode shows a "not configured" toast.
 
 ---
 
@@ -527,7 +514,7 @@ firmware/
   esp32-sensor-node/    ESP32 38-pin telemetry node
 tools/                  Simulators and test suites
 docs/                   API reference + English/Arabic deployment guides
-render.yaml             Legacy Render Blueprint (unused; kept for reference)
+render.yaml             Render Blueprint (single web service)
 Dockerfile              Container build
 ```
 

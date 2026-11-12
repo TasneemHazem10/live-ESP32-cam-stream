@@ -378,11 +378,9 @@ export class LiveStream {
     socket.binaryType = 'arraybuffer';
     this.ws = socket;
 
-    // Vercel WebSocket connections are pinned to one function instance. The
-    // socket can open successfully while every ESP32 upload lands on other
-    // instances, so "open" does not mean frames will arrive. If no binary
-    // frame shows up shortly after connecting, switch to HTTP polling, which
-    // reads the shared frame store and therefore works across instances.
+    // A socket can open while no frames arrive (the camera is off). If no
+    // binary frame shows up shortly after connecting, report it so the UI can
+    // keep the "waiting" panel instead of pretending to be live.
     this.firstFrameTimer = setTimeout(() => {
       if (!this.started || run !== this.runId) return;
       if (this.frameCount > 0) return;

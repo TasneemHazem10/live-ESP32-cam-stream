@@ -2,9 +2,9 @@ const params = new URLSearchParams(window.location.search);
 
 // The relay (Render) is the only source of frames: the ESP32-CAM POSTs raw
 // RGB565 buffers to /api/upload-frame there, the relay JPEG-encodes them and
-// pushes them to browsers over /ws/frames. When the dashboard is served by the
-// relay itself an empty base means "same origin"; when it is served from Vercel
-// the base points at Render. Override per session with ?api=…
+// pushes them to browsers over /ws/frames. The dashboard is served by the same
+// process, so an empty base means "same origin"; ?api= still overrides it for
+// pointing a local page at a remote relay.
 const configured = params.get('api') || window.MIRSAD_API_BASE || window.API_BASE || '';
 
 export const API_BASE = String(configured).replace(/\/+$/, '');

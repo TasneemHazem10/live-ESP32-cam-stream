@@ -167,9 +167,10 @@ One Render web service serves both the frontend and the API.
 3. Connect GitHub and select the repository.
 4. Render detects `render.yaml` and shows the **mirsad-live** service.
 5. Review the settings and click **Apply**.
-6. Render **auto-generates `UPLOAD_TOKEN`** for you. After the service is created, open
-   **Dashboard → your service → Environment** and copy the token — you will paste it into the
-   ESP32 sketch.
+6. `UPLOAD_TOKEN` is empty in `render.yaml` on purpose, so flashing needs no extra
+   secret. To lock the endpoint to your camera later, set a long random value in
+   **Dashboard → your service → Environment** and flash the same string into the
+   sketch (see “Generate `UPLOAD_TOKEN`” below).
 7. TURN is optional. The Blueprint uses public STUN by default. To support very restrictive
    networks later, add `METERED_DOMAIN`, `METERED_API_KEY` and `METERED_REGION` under
    **Dashboard → your service → Environment** and redeploy.

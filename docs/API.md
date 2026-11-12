@@ -447,6 +447,7 @@ into the room data channel with topic `sensors` as
   "config": {
     "demoFallback": false,
     "uploadAuth": true,
+    "jpegEncoder": "sharp",
     "jpegQuality": 80,
     "frameSize": "320x240",
     "resolution": { "width": 320, "height": 240 },

@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 
-const SITE = (process.env.SITE || process.argv[2] || 'https://livestream-lemon-omega.vercel.app').replace(/\/+$/, '');
+const SITE = (process.env.SITE || process.argv[2] || 'https://live-esp32-cam-stream.onrender.com').replace(/\/+$/, '');
 const RELAY = (process.env.RELAY || process.argv[3] || 'https://live-esp32-cam-stream.onrender.com').replace(/\/+$/, '');
 
 const CHROME_CANDIDATES = [

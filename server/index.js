@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ROOT_DIR, config, PUBLIC_DIR, hasLiveKit, hasUploadAuth } from './config.js';
+import { getEncoder } from './encoder.js';
 import { frameHub } from './frameHub.js';
 import { sensorStore } from './sensors.js';
 import { broadcastSensor, createLiveKitToken, liveKitStatus } from './livekit.js';
@@ -181,7 +182,7 @@ function frameOptions(req) {
   };
 }
 
-function uploadFrame(req, res) {
+async function uploadFrame(req, res) {
   const started = Date.now();
   const raw = Buffer.isBuffer(req.body) ? req.body : null;
 
@@ -204,7 +205,7 @@ function uploadFrame(req, res) {
         deviceId: options.deviceId,
       });
     } else {
-      frame = frameHub.ingestRgb565(raw, options);
+      frame = await frameHub.ingestRgb565(raw, options);
     }
 
     return res.json({
@@ -530,6 +531,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
     config: {
       demoFallback: config.demoFallback,
       uploadAuth: hasUploadAuth(),
+      jpegEncoder: await getEncoder(),
       jpegQuality: config.jpegQuality,
       frameSize: `${config.defaultWidth}x${config.defaultHeight}`,
       resolution: { width: config.defaultWidth, height: config.defaultHeight },

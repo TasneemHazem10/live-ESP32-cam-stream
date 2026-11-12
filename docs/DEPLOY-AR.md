@@ -148,8 +148,10 @@ git status
 3. اربط حساب GitHub واختر المستودع الذي رفعت إليه المشروع.
 4. سيتعرّف Render على ملف `render.yaml` ويعرض خدمة باسم **mirsad-live**.
 5. راجع الإعدادات ثم اضغط **Apply**.
-6. يولّد Render قيمة **`UPLOAD_TOKEN`** تلقائيًا. بعد إنشاء الخدمة افتح
-   **Dashboard → الخدمة → Environment** وانسخ القيمة — ستضعها في كود ESP32.
+6. قيمة `UPLOAD_TOKEN` فارغة في `render.yaml` عن قصد، حتى لا تحتاج إلى سرّ إضافي
+   أثناء الحرق. لتقييد نقطة الرفع بكاميرتك لاحقًا، ضع قيمة عشوائية طويلة في
+   **Dashboard → الخدمة → Environment** واحرق نفس القيمة في الكود (انظر
+   «توليد `UPLOAD_TOKEN`» أدناه).
 7. خدمة TURN اختيارية. يستخدم الـ Blueprint خوادم STUN العامة افتراضيًا. لدعم الشبكات
    المقيّدة جدًا لاحقًا، أضف `METERED_DOMAIN` و`METERED_API_KEY` ومنطقة `METERED_REGION` من
    **Dashboard → الخدمة → Environment** ثم أعد النشر.
