@@ -76,14 +76,18 @@ byte order and JPEG encoding are all correct.
 
 ---
 
-## Step 2 — WebRTC + Metered TURN (optional but recommended)
+## Step 2 — WebRTC + Metered TURN (required for WebRTC on Render)
 
 The relay already speaks WebRTC: `POST /api/rtc/offer` creates a werift peer
 per browser and pushes each JPEG over an SCTP **data channel** (frame header +
 JPEG bytes). No audio/video tracks — the camera has no mic and no speaker.
 
-STUN alone works on most home networks. Add TURN when a viewer is behind
-symmetric NAT or a corporate firewall.
+**TURN is not optional on Render.** The service only exposes HTTP/HTTPS through
+Render's proxy; no public UDP port exists for ICE, so a direct peer-to-peer
+connection cannot complete. With Metered configured, both peers connect
+outbound to the TURN relay and the data channel works. Without it, the
+dashboard's WebRTC mode times out after 20 s and falls back to WebSocket.
+(The camera upload itself never uses TURN.)
 
 1. Sign up at <https://www.metered.ca/stun-turn> (free tier) and create an app.
 2. Copy the app **subdomain** (e.g. `myapp.metered.live`) and the **API key**.
@@ -115,6 +119,8 @@ curl.exe -sS https://live-esp32-cam-stream.onrender.com/api/rtc/config
 Transport selection is automatic: the dashboard tries the configured mode
 (default **WebSocket**) and falls back to the next one if frames do not arrive.
 You can force WebRTC with `?mode=webrtc` or the transport switcher in the UI.
+Because Render has no public UDP port, WebRTC needs the Metered variables
+above; without them it falls back to WebSocket after its 20 s frame timeout.
 
 Test WebRTC without a browser camera:
 

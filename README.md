@@ -172,6 +172,11 @@ ffmpeg, works with the pure-TypeScript `werift` implementation, and still traver
 Metered TURN. Frames carry `uint32 BE sequence` + `float64 BE server timestamp` (12 bytes),
 followed by the JPEG bytes.
 
+On Render, WebRTC **requires** Metered TURN: the service has no public UDP port for ICE, so only
+relayed candidates can connect. Configure `METERED_DOMAIN` + `METERED_API_KEY` (see
+[Enable Metered TURN](#2-enable-metered-turn)); without them WebSocket remains the working
+transport and WebRTC mode falls back after 20 s.
+
 ---
 
 ## Browser vision effects

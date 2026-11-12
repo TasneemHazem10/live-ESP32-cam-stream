@@ -11,7 +11,6 @@
  * valid JPEG.
  */
 
-import jpeg from 'jpeg-js';
 import { RTCPeerConnection } from 'werift';
 
 const BASE = (process.env.SERVER_URL || process.argv[2] || 'http://localhost:3000').replace(/\/+$/, '');
@@ -22,30 +21,35 @@ function authHeaders(extra = {}) {
   return TOKEN ? { ...extra, 'x-upload-token': TOKEN } : extra;
 }
 
-/** A tiny deterministic JPEG so the check does not need a real camera. */
-function testJpeg(width = 64, height = 48) {
-  const data = Buffer.allocUnsafe(width * height * 4);
+/** A tiny deterministic RGB565 frame so the check does not need a real camera. */
+function testRgb565(width = 64, height = 48) {
+  const data = Buffer.allocUnsafe(width * height * 2);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const i = (y * width + x) * 4;
-      data[i] = Math.round((x / width) * 255);
-      data[i + 1] = Math.round((y / height) * 255);
-      data[i + 2] = 180;
-      data[i + 3] = 255;
+      const r = Math.round((x / (width - 1)) * 31);
+      const g = Math.round((y / (height - 1)) * 63);
+      const pixel = (r << 11) | (g << 5) | 20;
+      data.writeUInt16LE(pixel, (y * width + x) * 2);
     }
   }
-  return jpeg.encode({ data, width, height }, 70).data;
+  return data;
 }
 
-/** Keep the relay fed while the check waits for a second WebRTC frame. */
+/**
+ * Keep the relay fed while the check waits for a second WebRTC frame.
+ *
+ * Uses the camera endpoint, not /api/laptop/frame: that route is deliberately
+ * restricted to the relay's own machine, so it returns 403 when this check runs
+ * against Render. /api/upload-frame is the same path the ESP32-CAM uses.
+ */
 function startFramePump() {
-  const frame = testJpeg();
+  const frame = testRgb565();
   let stopped = false;
   const tick = () => {
     if (stopped) return;
-    fetch(`${BASE}/api/laptop/frame?device=WEBRTC-TEST&w=64&h=48`, {
+    fetch(`${BASE}/api/upload-frame?device=WEBRTC-TEST&w=64&h=48&format=rgb565le`, {
       method: 'POST',
-      headers: authHeaders({ 'content-type': 'image/jpeg' }),
+      headers: authHeaders({ 'content-type': 'application/octet-stream' }),
       body: frame,
       signal: AbortSignal.timeout(4000),
     }).catch(() => {});
