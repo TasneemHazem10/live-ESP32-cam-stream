@@ -271,7 +271,7 @@ app.post(
   uploadFrame,
 );
 
-app.get('/api/frame.jpg', (req, res) => {
+function sendLatestFrame(req, res) {
   const frame = frameHub.latest;
   if (!frame) {
     res.setHeader('Cache-Control', 'no-store');
@@ -284,11 +284,13 @@ app.get('/api/frame.jpg', (req, res) => {
   res.setHeader('X-Frame-Time', String(frame.ts));
   res.setHeader('X-Frame-Source', frame.source);
   return res.send(frame.jpeg);
-});
+}
 
-app.get('/api/latest-frame', (req, res) => {
-  res.redirect(307, '/api/frame.jpg');
-});
+app.get('/api/frame.jpg', sendLatestFrame);
+
+// The handover document's reference name; same JPEG, no redirect so it works
+// as a plain <img src> or fetch() target without following a 307.
+app.get('/api/latest-frame', sendLatestFrame);
 
 /* ------------------------------------------------------------------ */
 /* MJPEG streaming                                                     */
