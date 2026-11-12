@@ -2,7 +2,7 @@ import { getLang, initI18n, t } from './i18n.js';
 import { EFFECTS, applyEffect } from './effects.js';
 import { LiveStream } from './stream.js';
 import { Sparkline, TelemetryChart } from './charts.js';
-import { absoluteUrl, wsUrl } from './runtime.js';
+import { absoluteUrl, api, wsUrl } from './runtime.js';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                     */
@@ -1151,7 +1151,7 @@ function setupStageControls() {
       const link = document.createElement('a');
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       link.href = url;
-      link.download = `stream-${state.effect}-${stamp}.png`;
+      link.download = `mirsad-${state.effect}-${stamp}.png`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1477,10 +1477,26 @@ connectSensorSocket();
 refreshStatus();
 // The relay receives raw RGB565 frames from the ESP32-CAM over
 // POST /api/upload-frame, encodes them to JPEG and pushes them to this page
-// over /ws/frames. WS is the low-latency default; HTTP polling stays as the
-// fallback when a proxy in front of the relay buffers WebSockets.
-const defaultMode = 'ws';
-startMode(defaultMode, { announce: false });
+// over /ws/frames. Prefer the WebRTC data channel only when the relay reports
+// working Metered TURN credentials: Render exposes no public UDP port, so
+// direct ICE cannot connect there, while both peers can reach TURN. If the
+// status probe fails or times out, start on WebSocket — it always works.
+async function initialMode() {
+  try {
+    const response = await fetch(api('/api/status'), {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return 'ws';
+    const status = await response.json();
+    if (status?.webrtc?.available && status?.webrtc?.turn) return 'webrtc';
+  } catch {
+    /* cold start or offline: WebSocket is the safe default */
+  }
+  return 'ws';
+}
+
+initialMode().then((mode) => startMode(mode, { announce: false }));
 
 // Live-only watchdog: if frames stop arriving, stop claiming LIVE and show the
 // waiting panel instead of leaving a frozen frame on screen.
