@@ -165,8 +165,13 @@ board **AI Thinker ESP32-CAM**, **PSRAM: Enabled**, then Upload.
 
 When it finishes: remove `GPIO0` from `GND`, tap `RST`.
 
-The Wi-Fi already stored on the board is kept, so there is no captive portal and
-no password to type.
+Wi-Fi credentials are stored on the board. If the saved network is still in
+range, no portal appears. If there is no saved network — or that network is
+gone — the board opens `ESP32-CAM-Config` at `192.168.4.1` so you can pick
+**any 2.4 GHz Wi-Fi** and enter its password. The camera then gets a normal
+DHCP address on whichever network it joins, and always uploads to the public
+Render hostname (`live-esp32-cam-stream.onrender.com`), never to a local IP.
+You do **not** have to use `WEAO9A85`; choose whatever network you want.
 
 ---
 
