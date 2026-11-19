@@ -163,7 +163,9 @@ let dstImageData = null;
 
 function prepareCanvas(canvas, ctx) {
   if (!canvas || !ctx) return { width: 0, height: 0 };
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  // The camera is 160x120; anything above ~1.5x device pixels just costs fill
+  // rate on large displays without adding real detail.
+  const dpr = Math.min(1.5, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, Math.round((rect.width || canvas.clientWidth || 320) * dpr));
   const height = Math.max(1, Math.round((rect.height || canvas.clientHeight || 240) * dpr));
@@ -333,7 +335,7 @@ function setEffect(id) {
 
 function updateEffectLabels() {
   const effect = EFFECTS.find((item) => item.id === state.effect) || EFFECTS[0];
-  dom.hudEffect.textContent = t(effect.nameKey);
+  setMetric(dom.hudEffect, t(effect.nameKey));
 }
 
 function setIntensity(percent) {
@@ -465,36 +467,57 @@ const stream = new LiveStream({
   },
 });
 
+// Live numbers change constantly; animate only the ones that actually changed
+// so the dashboard feels responsive without flickering on every frame.
+function setMetric(el, value) {
+  if (!el) return;
+  const next = String(value);
+  if (el.textContent === next) return;
+  el.textContent = next;
+  if (typeof el.animate !== 'function') return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  el.animate(
+    [
+      { opacity: 0.35, transform: 'translateY(3px)' },
+      { opacity: 1, transform: 'none' },
+    ],
+    { duration: 420, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
+  );
+}
+
 function updateStats(stats = {}) {
   const fps = Number.isFinite(stats.fps) ? Math.round(stats.fps * 10) / 10 : null;
   const latency = Number.isFinite(stats.latency) ? Math.max(0, Math.round(stats.latency)) : null;
   const bitrate = Number.isFinite(stats.bitrateKbps) ? stats.bitrateKbps : null;
 
-  if (dom.heroFps) dom.heroFps.textContent = fps === null ? '--' : String(fps);
-  if (dom.statFps) dom.statFps.textContent = fps === null ? '--' : String(fps);
-  if (dom.studioFps) dom.studioFps.textContent = fps === null ? '--' : String(fps);
-  if (dom.metricFps) dom.metricFps.textContent = fps === null ? '--' : String(fps);
+  setMetric(dom.heroFps, fps === null ? '--' : String(fps));
+  setMetric(dom.statFps, fps === null ? '--' : String(fps));
+  setMetric(dom.studioFps, fps === null ? '--' : String(fps));
+  setMetric(dom.metricFps, fps === null ? '--' : String(fps));
 
-  if (dom.heroLatency) dom.heroLatency.textContent = latency === null ? '--' : String(latency);
-  if (dom.statLatency) dom.statLatency.textContent = latency === null ? '--' : String(latency);
-  if (dom.studioLatency) dom.studioLatency.textContent = latency === null ? '--' : `${latency} ms`;
-  if (dom.metricLatency) dom.metricLatency.textContent = latency === null ? '--' : `${latency} ms`;
+  setMetric(dom.heroLatency, latency === null ? '--' : String(latency));
+  setMetric(dom.statLatency, latency === null ? '--' : String(latency));
+  setMetric(dom.studioLatency, latency === null ? '--' : `${latency} ms`);
+  setMetric(dom.metricLatency, latency === null ? '--' : `${latency} ms`);
 
   if (dom.metricBitrate) {
-    if (bitrate === null) dom.metricBitrate.textContent = '--';
-    else if (bitrate >= 1000) dom.metricBitrate.textContent = `${(bitrate / 1000).toFixed(2)} Mbps`;
-    else dom.metricBitrate.textContent = `${Math.round(bitrate)} kbps`;
+    if (bitrate === null) setMetric(dom.metricBitrate, '--');
+    else if (bitrate >= 1000) setMetric(dom.metricBitrate, `${(bitrate / 1000).toFixed(2)} Mbps`);
+    else setMetric(dom.metricBitrate, `${Math.round(bitrate)} kbps`);
   }
 
   if (dom.metricFrames) {
     const frames = Number.isFinite(stats.frames) ? stats.frames : null;
-    dom.metricFrames.textContent = frames === null ? '--' : frames.toLocaleString(state.lang === 'ar' ? 'ar-EG' : 'en-US');
+    setMetric(
+      dom.metricFrames,
+      frames === null ? '--' : frames.toLocaleString(state.lang === 'ar' ? 'ar-EG' : 'en-US'),
+    );
   }
 
   if (stats.connected === false && fps === 0) {
     // Keep the last useful values while reconnecting; only zero the live rate.
-    if (dom.heroFps) dom.heroFps.textContent = '--';
-    if (dom.studioFps) dom.studioFps.textContent = '--';
+    setMetric(dom.heroFps, '--');
+    setMetric(dom.studioFps, '--');
   }
 }
 
@@ -512,6 +535,7 @@ function applySource(source) {
     dom.sourceBadge.textContent = label;
     dom.sourceBadge.classList.toggle('is-live', isLive);
   }
+  dom.videoWrap?.classList.toggle('is-live', isLive);
   dom.previewNote?.classList.toggle('is-hidden', isLive);
 }
 
@@ -1038,8 +1062,8 @@ async function refreshStatus() {
   }
 
   if (camera.fps && !state.streamConnected) {
-    if (dom.heroFps) dom.heroFps.textContent = String(camera.fps);
-    if (dom.statFps) dom.statFps.textContent = String(camera.fps);
+    setMetric(dom.heroFps, String(camera.fps));
+    setMetric(dom.statFps, String(camera.fps));
   }
   if (!state.streamConnected && camera.width && camera.height) {
     dom.metricResolution.textContent = `${camera.width}×${camera.height}`;

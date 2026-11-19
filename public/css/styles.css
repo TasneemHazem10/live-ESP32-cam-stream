@@ -176,7 +176,7 @@ code {
 }
 
 .container {
-  width: min(1240px, calc(100% - var(--gutter) * 2));
+  width: min(1640px, calc(100% - var(--gutter) * 2));
   margin-inline: auto;
 }
 
@@ -1197,17 +1197,33 @@ body[data-lang="ar"] .kicker {
 /* Reveal / motion helpers */
 .reveal {
   opacity: 0;
-  transform: translateY(30px) scale(0.95);
+  transform: translate3d(0, 34px, 0) scale(0.96);
+  filter: blur(7px);
   transition:
-    opacity 0.6s var(--ease-out),
-    transform 0.6s var(--ease-out);
-  transition-delay: calc(var(--i, 0) * 70ms);
-  will-change: opacity, transform;
+    opacity 0.75s var(--ease-out),
+    transform 0.75s var(--ease-out),
+    filter 0.75s var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 85ms);
+  backface-visibility: hidden;
+  will-change: opacity, transform, filter;
+}
+
+.reveal[data-reveal="left"] {
+  transform: translate3d(-38px, 0, 0) scale(0.98);
+}
+
+.reveal[data-reveal="right"] {
+  transform: translate3d(38px, 0, 0) scale(0.98);
+}
+
+.reveal[data-reveal="zoom"] {
+  transform: scale(0.9);
 }
 
 .reveal.is-visible {
   opacity: 1;
   transform: none;
+  filter: blur(0);
 }
 
 /* --------------------------------------------------------------------------
@@ -1231,8 +1247,8 @@ body[data-lang="ar"] .kicker {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
-  gap: clamp(36px, 5vw, 72px);
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: clamp(32px, 4vw, 64px);
   align-items: center;
   position: relative;
   z-index: 2;
@@ -1387,7 +1403,7 @@ body[data-lang="ar"] .hero h1 {
   position: relative;
   z-index: 3;
   width: 100%;
-  max-width: 560px;
+  max-width: 680px;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 32px;
@@ -1653,7 +1669,7 @@ body[data-lang="ar"] .hero h1 {
 .stats-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  margin-top: clamp(52px, 8vw, 90px);
+  margin-top: clamp(42px, 6vw, 68px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 24px;
@@ -1717,7 +1733,7 @@ body[data-lang="ar"] .hero h1 {
 
 .section {
   position: relative;
-  padding: clamp(72px, 10vw, 120px) 0;
+  padding: clamp(64px, 8vw, 104px) 0;
 }
 
 .section + .section {
@@ -1752,6 +1768,27 @@ body[data-lang="ar"] .hero h1 {
   font-size: 1.05rem;
   line-height: 1.85;
   margin-bottom: 0;
+}
+
+/* A small underline draws in as each section heading settles. */
+.section-head > div:first-child .kicker {
+  position: relative;
+  padding-bottom: 10px;
+}
+
+.section-head > div:first-child .kicker::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0;
+  width: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--cyan), transparent);
+  transition: width 0.9s var(--ease-out) 0.25s;
+}
+
+.section-head.is-visible > div:first-child .kicker::after {
+  width: 72px;
 }
 
 /* --------------------------------------------------------------------------
@@ -1900,13 +1937,13 @@ body[data-lang="ar"] .hero h1 {
 
 .studio-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 400px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 22px;
   align-items: start;
 }
 
 .stage-card {
-  padding: 20px;
+  padding: 22px;
   overflow: hidden;
 }
 
@@ -2023,6 +2060,7 @@ body[data-lang="ar"] .hero h1 {
 .video-wrap {
   position: relative;
   aspect-ratio: 4 / 3;
+  max-height: min(78vh, 880px);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
@@ -2040,6 +2078,40 @@ body[data-lang="ar"] .hero h1 {
   box-shadow:
     inset 0 0 80px rgba(0, 0, 0, 0.7),
     0 0 35px rgba(0, 240, 255, 0.15);
+}
+
+/* A breathing halo makes the live state readable without another badge. */
+.video-wrap.is-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(52, 211, 153, 0.28),
+    inset 0 0 60px rgba(52, 211, 153, 0.05);
+  animation: live-halo 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes live-halo {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.video-wrap.is-live .video-scanlines {
+  animation: scan-drift 9s linear infinite;
+}
+
+@keyframes scan-drift {
+  to {
+    background-position: 0 30px;
+  }
 }
 
 .video-wrap canvas {
@@ -3441,7 +3513,7 @@ input[type="range"]::-moz-range-thumb {
   .float-b { inset-inline-end: -2%; }
 
   .studio-grid {
-    grid-template-columns: minmax(0, 1fr) 350px;
+    grid-template-columns: minmax(0, 1fr) 320px;
   }
 
   .sensor-layout {
@@ -3811,7 +3883,9 @@ input[type="range"]::-moz-range-thumb {
   .preview-scan,
   .signal-bars i,
   .rec-dot,
-  .live-dot {
+  .live-dot,
+  .video-wrap.is-live::after,
+  .video-wrap.is-live .video-scanlines {
     animation: none !important;
   }
 }
