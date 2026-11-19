@@ -78,6 +78,11 @@ Preferences prefs;
 // ---------------------------------------------------------------------------
 
 WiFiClientSecure tlsClient;
+
+// Keep the HTTPClient alive across frames. A local HTTPClient would be destroyed
+// at the end of every postFrame(), and its destructor calls _client->stop(),
+// which kills the reused TLS connection and forces a ~1.5 s handshake per frame.
+HTTPClient uploadHttp;
 String uploadUrlJpeg;
 String uploadUrlRgb;
 
@@ -326,7 +331,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(200);
-  Serial.println("[boot] MIRSAD camera v6 (runtime-tunable software JPEG)");
+  Serial.println("[boot] MIRSAD camera v6.1 (persistent TLS keep-alive)");
 
   prefs.begin("mirsad", true);
   jpegQuality = prefs.getUChar("quality", DEFAULT_QUALITY);
@@ -365,6 +370,9 @@ void setup() {
 
   tlsClient.setInsecure();
   tlsClient.setHandshakeTimeout(20);
+  uploadHttp.setConnectTimeout(10000);
+  uploadHttp.setTimeout(15000);
+  uploadHttp.setReuse(true);
 
   Serial.print("[relay] ");
   Serial.println(uploadUrlJpeg);
@@ -378,29 +386,25 @@ void setup() {
 // ---------------------------------------------------------------------------
 
 bool postFrame(const uint8_t *data, size_t len, bool isJpeg) {
-  HTTPClient http;
-  http.setConnectTimeout(10000);
-  http.setTimeout(15000);
-  http.setReuse(true);
-
-  if (!http.begin(tlsClient, isJpeg ? uploadUrlJpeg : uploadUrlRgb)) {
+  if (!uploadHttp.begin(tlsClient, isJpeg ? uploadUrlJpeg : uploadUrlRgb)) {
     Serial.println("[post] begin failed");
     return false;
   }
 
-  http.addHeader("Content-Type", "application/octet-stream");
-  http.addHeader("X-Device-Id", DEVICE_ID);
-  http.addHeader("X-Frame-Width", String(frameW));
-  http.addHeader("X-Frame-Height", String(frameH));
-  http.addHeader("X-Frame-Format", isJpeg ? "jpeg" : "rgb565le");
+  uploadHttp.addHeader("Content-Type", "application/octet-stream");
+  uploadHttp.addHeader("X-Device-Id", DEVICE_ID);
+  uploadHttp.addHeader("X-Frame-Width", String(frameW));
+  uploadHttp.addHeader("X-Frame-Height", String(frameH));
+  uploadHttp.addHeader("X-Frame-Format", isJpeg ? "jpeg" : "rgb565le");
 
-  int code = http.POST(const_cast<uint8_t *>(data), len);
+  int code = uploadHttp.POST(const_cast<uint8_t *>(data), len);
   if (code <= 0) {
-    Serial.printf("[post] failed: %s\n", http.errorToString(code).c_str());
+    Serial.printf("[post] failed: %s\n", uploadHttp.errorToString(code).c_str());
   } else if (code != 200) {
     Serial.printf("[post] server said HTTP %d\n", code);
   }
-  http.end();
+  // end() keeps the TCP/TLS socket open because setReuse(true) is set.
+  uploadHttp.end();
 
   if (code != 200) {
     tlsClient.stop();
