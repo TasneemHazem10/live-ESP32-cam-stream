@@ -1,6 +1,6 @@
 {
   "name": "MIRSAD ESP32-CAM",
-  "version": "3.1.0",
+  "version": "5.0.0",
   "builds": [
     {
       "chipFamily": "ESP32",

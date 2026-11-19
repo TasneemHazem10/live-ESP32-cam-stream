@@ -1,35 +1,21 @@
 /*
  * ============================================================================
- *  MIRSAD — ESP32-CAM live streamer  (v3, HTTP RGB565 — spec transport)
+ *  MIRSAD — ESP32-CAM live streamer  (v5, RGB565 capture + software JPEG)
  * ----------------------------------------------------------------------------
  *  Board   : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
- *  Sensor  : 320x240 (QVGA), raw RGB565, 2 bytes/pixel -> 153,600 B per frame
+ *  Sensor  : 320x240 (QVGA) RGB565. This sensor has NO hardware JPEG mode, so
+ *            we capture RGB565 and use the ESP32's software JPEG encoder
+ *            (frame2jpg) before upload. ~10-25 KB/frame instead of 153,600 B.
  *  Uplink  : HTTP POST application/octet-stream to the relay on Render
  *
  *        ESP32-CAM --HTTPS POST /api/upload-frame--> Render relay
  *        Render relay --WSS /ws/frames (JPEG)------> browser
  *
- *  The relay decodes RGB565 to JPEG and fans it out over WebSocket, MJPEG or
- *  HTTP polling, so the camera never needs a public IP or port forwarding.
- *
- *  ---------------------------------------------------------------------------
- *  BEFORE FLASHING: set SERVER_HOST below
- *  ---------------------------------------------------------------------------
- *  SERVER_HOST must be the Render service host (no https://, no trailing /):
- *      Render dashboard -> your service -> the URL under the name,
- *      e.g. "mirsad-live-ab12.onrender.com"
+ *  The relay forwards the camera's JPEG untouched (no second lossy encode),
+ *  so this is both faster and sharper than the old raw-RGB565 upload.
  *
  *  Wi-Fi: send WIFI,<ssid>,<password> over the USB serial port at 115200 to
- *  store any 2.4 GHz network (works on any router, no portal needed). If no
- *  serial network is stored, the board falls back to "ESP32-CAM-Config".
- *
- *  Expected serial output at 115200 baud:
- *      [boot] MIRSAD camera v3 (HTTP RGB565)
- *      [wifi] connected: 192.168.1.24
- *      [relay] https://…/api/upload-frame?w=320&h=240&format=rgb565le…
- *      [relay] awake (HTTP 200)
- *      [post] 1 frames, 153600 B, 0 failed
- *      [stats] 4.8 fps, 720 KB/s, 0 failed
+ *  store any 2.4 GHz network. If none is stored, "ESP32-CAM-Config" AP opens.
  * ============================================================================
  */
 
@@ -38,38 +24,35 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_camera.h>
+#include <img_converters.h>
 #include <Preferences.h>
 
 Preferences prefs;
 
 // ---------------------------------------------------------------------------
-// 1. Relay (Render) — EDIT THIS ONE LINE
+// 1. Relay (Render)
 // ---------------------------------------------------------------------------
 
 #define SERVER_HOST "live-esp32-cam-stream.onrender.com"
 #define SERVER_PORT 443
 #define UPLOAD_PATH "/api/upload-frame"
-
-// Optional shared secret. Leave empty unless UPLOAD_TOKEN is set on Render.
 #define UPLOAD_TOKEN ""
-
 #define DEVICE_ID "ESP32-CAM-RHYX"
 
 // ---------------------------------------------------------------------------
-// 2. Frame parameters (must match the handover spec)
+// 2. Frame parameters
 // ---------------------------------------------------------------------------
 
 #define FRAME_W 320
 #define FRAME_H 240
-#define FRAME_BYTES (FRAME_W * FRAME_H * 2)   // 153,600 bytes
 
-// RGB565 is 153,600 B/frame, so each frame is ~20x a JPEG. 5 fps is a good
-// compromise (about 2.7 GB/hour). Lower this on metered links.
-#define TARGET_FPS 5
+// Standard JPEG quality (0-100). 80 keeps the picture crisp while the payload
+// drops from 153,600 B to ~20-30 KB — roughly a 5-8x faster upload.
+#define JPEG_QUALITY 80
+
+#define TARGET_FPS 10
 #define FRAME_INTERVAL_MS (1000 / TARGET_FPS)
 
-// Wake-up ping: Render's free tier sleeps when idle. The first request can take
-// up to a minute, so wait for /healthz before streaming instead of failing.
 #define HEALTH_PATH "/healthz"
 #define WAKE_TIMEOUT_MS 90000
 
@@ -100,7 +83,8 @@ Preferences prefs;
 // ---------------------------------------------------------------------------
 
 WiFiClientSecure tlsClient;
-String uploadUrl;
+String uploadUrlJpeg;
+String uploadUrlRgb;
 
 unsigned long lastFrameAt = 0;
 unsigned long lastStatsAt = 0;
@@ -114,7 +98,7 @@ uint32_t statsBytes = 0;
 #define WIFI_CONNECT_TIMEOUT_MS 25000
 
 // ---------------------------------------------------------------------------
-// 4b. Wi-Fi stored over USB serial (works on any 2.4 GHz network)
+// 4b. Wi-Fi stored over USB serial
 // ---------------------------------------------------------------------------
 
 bool applySerialWifi() {
@@ -177,7 +161,7 @@ void handleSerialConfig() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Helper: wait for the relay to answer (wakes a sleeping Render instance)
+// 5. Wake a sleeping Render instance
 // ---------------------------------------------------------------------------
 
 bool wakeRelay() {
@@ -218,8 +202,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(200);
-  Serial.println();
-  Serial.println("[boot] MIRSAD camera v3 (HTTP RGB565)");
+  Serial.println("[boot] MIRSAD camera v5 (RGB565 -> software JPEG)");
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -247,12 +230,12 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
 
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_RGB565;   // spec: no hardware JPEG
+  config.pixel_format = PIXFORMAT_RGB565;   // this sensor has no hardware JPEG
   config.frame_size = FRAMESIZE_QVGA;       // 320x240
   config.fb_count = psramFound() ? 2 : 1;
   config.grab_mode = psramFound() ? CAMERA_GRAB_LATEST : CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
-  config.jpeg_quality = 12;                 // ignored in RGB565 mode
+  config.jpeg_quality = JPEG_QUALITY;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -261,15 +244,20 @@ void setup() {
     ESP.restart();
   }
 
+  // Colour tuning for a clearer, more vivid picture.
   sensor_t *sensor = esp_camera_sensor_get();
   if (sensor) {
     sensor->set_vflip(sensor, 0);
     sensor->set_hmirror(sensor, 0);
     sensor->set_brightness(sensor, 0);
-    sensor->set_saturation(sensor, 0);
+    sensor->set_contrast(sensor, 1);
+    sensor->set_saturation(sensor, 1);
+    sensor->set_sharpness(sensor, 1);
+    sensor->set_wb_mode(sensor, 0);       // auto white balance
+    sensor->set_exposure_ctrl(sensor, 1); // auto exposure
+    sensor->set_gain_ctrl(sensor, 1);     // auto gain
   }
 
-  // A network stored over USB serial wins; otherwise use the WiFiManager portal.
   Serial.println("[serial] send WIFI,<ssid>,<password> to change network");
   if (!applySerialWifi()) {
     WiFiManager wm;
@@ -278,7 +266,7 @@ void setup() {
     prefs.begin("mirsad", true);
     bool hadSerialNetwork = prefs.getString("ssid", "").length() > 0;
     prefs.end();
-    if (hadSerialNetwork) wm.resetSettings();  // failed network -> open portal now
+    if (hadSerialNetwork) wm.resetSettings();
     Serial.println("[wifi] connecting (portal 'ESP32-CAM-Config' if no saved network)...");
     if (!wm.autoConnect("ESP32-CAM-Config")) {
       Serial.println("[wifi] failed -> restarting");
@@ -288,19 +276,23 @@ void setup() {
     Serial.println("[wifi] connected: " + WiFi.localIP().toString());
   }
 
-  tlsClient.setInsecure();            // Render's certificate is valid; no CA bundle on the board
+  tlsClient.setInsecure();
   tlsClient.setHandshakeTimeout(20);
 
-  uploadUrl = String("https://") + SERVER_HOST + ":" + SERVER_PORT + UPLOAD_PATH;
-  uploadUrl += String("?w=") + FRAME_W + "&h=" + FRAME_H + "&format=rgb565le";
-  uploadUrl += String("&device=") + DEVICE_ID;
-  if (strlen(UPLOAD_TOKEN) > 0) uploadUrl += String("&token=") + UPLOAD_TOKEN;
+  String base = String("https://") + SERVER_HOST + ":" + SERVER_PORT + UPLOAD_PATH;
+  uploadUrlJpeg = base + String("?w=") + FRAME_W + "&h=" + FRAME_H + "&format=jpeg";
+  uploadUrlRgb  = base + String("?w=") + FRAME_W + "&h=" + FRAME_H + "&format=rgb565le";
+  uploadUrlJpeg += String("&device=") + DEVICE_ID;
+  uploadUrlRgb  += String("&device=") + DEVICE_ID;
+  if (strlen(UPLOAD_TOKEN) > 0) {
+    uploadUrlJpeg += String("&token=") + UPLOAD_TOKEN;
+    uploadUrlRgb  += String("&token=") + UPLOAD_TOKEN;
+  }
 
   Serial.print("[relay] ");
-  Serial.println(uploadUrl);
+  Serial.println(uploadUrlJpeg);
 
   wakeRelay();
-
   lastStatsAt = millis();
 }
 
@@ -308,13 +300,13 @@ void setup() {
 // 7. Upload one frame
 // ---------------------------------------------------------------------------
 
-bool postFrame(const uint8_t *data, size_t len) {
+bool postFrame(const uint8_t *data, size_t len, bool isJpeg) {
   HTTPClient http;
   http.setConnectTimeout(10000);
   http.setTimeout(15000);
   http.setReuse(true);
 
-  if (!http.begin(tlsClient, uploadUrl)) {
+  if (!http.begin(tlsClient, isJpeg ? uploadUrlJpeg : uploadUrlRgb)) {
     Serial.println("[post] begin failed");
     return false;
   }
@@ -323,7 +315,7 @@ bool postFrame(const uint8_t *data, size_t len) {
   http.addHeader("X-Device-Id", DEVICE_ID);
   http.addHeader("X-Frame-Width", String(FRAME_W));
   http.addHeader("X-Frame-Height", String(FRAME_H));
-  http.addHeader("X-Frame-Format", "rgb565le");
+  http.addHeader("X-Frame-Format", isJpeg ? "jpeg" : "rgb565le");
 
   int code = http.POST(const_cast<uint8_t *>(data), len);
   if (code <= 0) {
@@ -334,8 +326,6 @@ bool postFrame(const uint8_t *data, size_t len) {
   http.end();
 
   if (code != 200) {
-    // A stale keep-alive socket cannot be reused; drop it so the next attempt
-    // performs a clean handshake.
     tlsClient.stop();
     return false;
   }
@@ -385,25 +375,42 @@ void loop() {
     return;
   }
 
-  if (fb->format != PIXFORMAT_RGB565 || fb->len < FRAME_BYTES) {
+  const size_t rgbBytes = FRAME_W * FRAME_H * 2;  // 153,600
+  if (fb->format != PIXFORMAT_RGB565 || fb->len < rgbBytes) {
     Serial.printf("[camera] unexpected frame: fmt=%d len=%u\n",
                   (int)fb->format, (unsigned)fb->len);
     esp_camera_fb_return(fb);
     return;
   }
 
-  bool ok = postFrame(fb->buf, FRAME_BYTES);
+  // Compress in software on the ESP32. frame2jpg() allocates the output buffer.
+  uint8_t *jpg = nullptr;
+  size_t jpgLen = 0;
+  bool compressed = frame2jpg(fb, JPEG_QUALITY, &jpg, &jpgLen);
+
+  bool ok;
+  size_t bytes;
+  if (compressed && jpg && jpgLen >= 100 && jpgLen < 400000) {
+    ok = postFrame(jpg, jpgLen, true);
+    bytes = jpgLen;
+  } else {
+    // Fallback: upload the raw frame exactly like the original firmware.
+    Serial.println("[jpeg] compression failed -> sending RGB565");
+    ok = postFrame(fb->buf, rgbBytes, false);
+    bytes = rgbBytes;
+  }
+  if (compressed && jpg) free(jpg);
   esp_camera_fb_return(fb);
 
   if (ok) {
     framesSent++;
     statsFrames++;
-    statsBytes += FRAME_BYTES;
+    statsBytes += bytes;
     if (framesSent == 1) {
       Serial.println("[post] first frame accepted by the relay");
     }
   } else {
     framesFailed++;
-    delay(200);   // brief backoff; keeps the log readable when the relay is down
+    delay(200);
   }
 }

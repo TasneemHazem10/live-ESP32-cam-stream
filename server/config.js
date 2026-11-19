@@ -69,8 +69,10 @@ export const config = {
     ttlSeconds: Math.min(24 * 60 * 60, Math.max(60, int(process.env.LIVEKIT_TOKEN_TTL, 6 * 60 * 60))),
   },
   metered: {
-    domain: (process.env.METERED_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
-    apiKey: process.env.METERED_API_KEY || '',
+    // Defaults are used when the Render dashboard has no env vars set, so TURN
+    // works out of the box. Env vars always win if you rotate credentials.
+    domain: (process.env.METERED_DOMAIN || 'metered.live').replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    apiKey: process.env.METERED_API_KEY || '3cad6f122e33b9c91f2441f9f6595b581744',
     region: process.env.METERED_REGION || '',
     ttlMs: int(process.env.METERED_TTL_MS, 30 * 60 * 1000),
   },
