@@ -98,8 +98,12 @@ WiFiClientSecure camTls;
 bool wsConnected = false;
 unsigned long wsLastRetryAt = 0;
 static bool wsSend(uint8_t *data, size_t len, uint8_t opcode);
+static bool sendWsMeta();
 
 uint8_t jpegQuality = DEFAULT_QUALITY;
+// Raw RGB565 over the WebSocket avoids the lossy on-device JPEG step: the
+// relay encodes with sharp at higher quality, and the camera saves ~29 ms.
+bool wsRaw = true;
 framesize_t frameSize = DEFAULT_SIZE;
 int frameW = 320;
 int frameH = 240;
@@ -292,13 +296,23 @@ void handleSerialConfig() {
             prefs.putUChar("size", (uint8_t)applied);
             prefs.end();
             Serial.printf("[serial] frame size = %dx%d\n", frameW, frameH);
-            if (wsConnected) {
-              char meta[96];
-              int n = snprintf(meta, sizeof(meta), "{\"w\":%d,\"h\":%d,\"device\":\"%s\"}",
-                               frameW, frameH, DEVICE_ID);
-              wsSend((uint8_t *)meta, (size_t)n, 0x1);
-            }
+            sendWsMeta();
           }
+        } else if (line.startsWith("FORMAT,")) {
+          String name = line.substring(7);
+          name.toLowerCase();
+          if (name == "raw" || name == "rgb565" || name == "rgb565le") {
+            wsRaw = true;
+          } else if (name == "jpeg" || name == "jpg") {
+            wsRaw = false;
+          } else {
+            Serial.println("[serial] FORMAT: raw | jpeg");
+          }
+          prefs.begin("mirsad", false);
+          prefs.putBool("wsraw", wsRaw);
+          prefs.end();
+          Serial.printf("[serial] WS format = %s\n", wsRaw ? "rgb565le" : "jpeg");
+          sendWsMeta();
         }
       }
       line = "";
@@ -350,11 +364,12 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(200);
-  Serial.println("[boot] MIRSAD camera v7 (persistent WebSocket uplink)");
+  Serial.println("[boot] MIRSAD camera v7.1 (raw WS uplink, server-side JPEG)");
 
   prefs.begin("mirsad", true);
   jpegQuality = prefs.getUChar("quality", DEFAULT_QUALITY);
   framesize_t saved = (framesize_t)prefs.getUChar("size", (uint8_t)DEFAULT_SIZE);
+  wsRaw = prefs.getBool("wsraw", true);
   prefs.end();
   if (jpegQuality < 30 || jpegQuality > 100) jpegQuality = DEFAULT_QUALITY;
   if (!validSize(saved)) saved = DEFAULT_SIZE;
@@ -369,7 +384,7 @@ void setup() {
     }
   }
 
-  Serial.println("[serial] WIFI,<ssid>,<password> | QUALITY,<30-100> | SIZE,qqvga|hqvga|qvga");
+  Serial.println("[serial] WIFI,<ssid>,<password> | QUALITY,<30-100> | SIZE,qqvga|hqvga|qvga | FORMAT,raw|jpeg");
   if (!applySerialWifi()) {
     WiFiManager wm;
     wm.setConnectTimeout(20);
@@ -449,6 +464,16 @@ static bool wsSend(uint8_t *data, size_t len, uint8_t opcode) {
   if (!tlsWriteAll(header, h)) return false;
   for (size_t i = 0; i < len; i++) data[i] ^= mask[i & 3];
   return len == 0 || tlsWriteAll(data, len);
+}
+
+// Tell the relay how to interpret the binary frames that follow.
+static bool sendWsMeta() {
+  if (!wsConnected) return false;
+  char meta[128];
+  int n = snprintf(meta, sizeof(meta),
+                   "{\"w\":%d,\"h\":%d,\"device\":\"%s\",\"format\":\"%s\"}",
+                   frameW, frameH, DEVICE_ID, wsRaw ? "rgb565le" : "jpeg");
+  return wsSend((uint8_t *)meta, (size_t)n, 0x1);
 }
 
 static bool wsReadExact(uint8_t *buf, size_t len, unsigned long timeoutMs) {
@@ -544,16 +569,14 @@ static bool wsConnect() {
     return false;
   }
 
-  char meta[96];
-  int n = snprintf(meta, sizeof(meta), "{\"w\":%d,\"h\":%d,\"device\":\"%s\"}",
-                   frameW, frameH, DEVICE_ID);
-  if (!wsSend((uint8_t *)meta, (size_t)n, 0x1)) {
+  wsConnected = true;
+  if (!sendWsMeta()) {
     wsDisconnect();
     return false;
   }
 
-  wsConnected = true;
-  Serial.printf("[ws] connected: %s (%dx%d)\n", path.c_str(), frameW, frameH);
+  Serial.printf("[ws] connected: %s (%dx%d, %s)\n", path.c_str(), frameW, frameH,
+                wsRaw ? "rgb565le" : "jpeg");
   return true;
 }
 
@@ -641,7 +664,7 @@ void loop() {
   }
 
   // WebSocket is pipelined: no per-frame response to wait for, so run as fast
-  // as capture + JPEG encoding allow. POST stays rate-limited to TARGET_FPS.
+  // as capture + encode/send allow. POST stays rate-limited to TARGET_FPS.
   if (!usingWs && now - lastFrameAt < FRAME_INTERVAL_MS) {
     delay(2);
     return;
@@ -665,33 +688,45 @@ void loop() {
     return;
   }
 
-  // Compress in software on the ESP32. frame2jpg() allocates the output buffer.
+  bool ok = false;
+  size_t bytes = rgbBytes;
+  unsigned long encMs = 0;
+  unsigned long postMs = 0;
   uint8_t *jpg = nullptr;
   size_t jpgLen = 0;
-  t0 = millis();
-  bool compressed = frame2jpg(fb, jpegQuality, &jpg, &jpgLen);
-  unsigned long encMs = millis() - t0;
 
-  bool ok;
-  size_t bytes;
-  t0 = millis();
-  if (compressed && jpg && jpgLen >= 100 && jpgLen < 400000) {
-    bytes = jpgLen;
-    if (usingWs) {
-      ok = wsSend(jpg, jpgLen, 0x2);   // masks jpg in place; do not POST it on failure
-      if (!ok) wsDisconnect();
-    } else {
-      ok = postFrame(jpg, jpgLen, true);
-    }
+  if (usingWs && wsRaw) {
+    // Fast path: no lossy encode on the ESP32. The relay converts RGB565 and
+    // encodes a higher-quality JPEG with sharp. wsSend masks in place, which
+    // is safe because the framebuffer is returned immediately afterwards.
+    t0 = millis();
+    ok = wsSend(fb->buf, rgbBytes, 0x2);
+    if (!ok) wsDisconnect();
+    postMs = millis() - t0;
   } else {
-    // WS ingest expects JPEG only; RGB565 must use the POST fallback path.
-    Serial.println("[jpeg] compression failed -> sending RGB565 via POST");
-    ok = postFrame(fb->buf, rgbBytes, false);
-    bytes = rgbBytes;
-  }
-  unsigned long postMs = millis() - t0;
+    // Compress in software on the ESP32 (on-device JPEG or POST fallback).
+    t0 = millis();
+    bool compressed = frame2jpg(fb, jpegQuality, &jpg, &jpgLen);
+    encMs = millis() - t0;
 
-  if (compressed && jpg) free(jpg);
+    t0 = millis();
+    if (compressed && jpg && jpgLen >= 100 && jpgLen < 400000) {
+      bytes = jpgLen;
+      if (usingWs) {
+        ok = wsSend(jpg, jpgLen, 0x2);   // masks in place; do not POST on failure
+        if (!ok) wsDisconnect();
+      } else {
+        ok = postFrame(jpg, jpgLen, true);
+      }
+    } else {
+      Serial.println("[jpeg] compression failed -> sending RGB565 via POST");
+      ok = postFrame(fb->buf, rgbBytes, false);
+      bytes = rgbBytes;
+    }
+    postMs = millis() - t0;
+  }
+
+  if (jpg) free(jpg);
   esp_camera_fb_return(fb);
 
   statsCap += capMs;

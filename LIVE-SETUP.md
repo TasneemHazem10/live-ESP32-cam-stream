@@ -7,8 +7,8 @@ dashboard *and* the API from the same process — there is no second host.
 ```text
 ESP32-CAM (RHYX-M21-45)                    Render (Node relay)                  Browser
 ───────────────────────                    ───────────────────                  ───────
-160x120 RGB565 → software JPEG  ─WSS────▶ /ws/camera (primary)      ─WSS────▶    /ws/frames  (default)
-~3 KB/frame (v7 firmware)        HTTP POST  POST /api/upload-frame    ─WebRTC─▶    /api/rtc/offer (data channel)
+160x120 RGB565 (raw)  ───WSS────▶ /ws/camera (primary)      ─WSS────▶    /ws/frames  (default)
+38 KB/frame → sharp JPEG          HTTP POST  POST /api/upload-frame    ─WebRTC─▶    /api/rtc/offer (data channel)
 saved Wi-Fi, or config portal              /api/frame.jpg                      MJPEG, HTTP poll
                                            /stream.mjpeg                       filters, effects
                                            TURN credentials ← Metered (enabled)
@@ -209,20 +209,20 @@ truth:
 
 ## Data cost (important on a MiFi)
 
-v7 compresses each 160×120 RGB565 frame (38,400 bytes) to a ~3 KB JPEG on the
-ESP32 and pushes it over one persistent WebSocket, so there is no per-frame HTTP
-round trip. The relay passes that JPEG through unchanged — no second encode.
-If the WebSocket is unavailable, the firmware automatically falls back to the
-original HTTPS POST path; if `frame2jpg()` ever fails, it sends raw RGB565
-(`?format=rgb565le`) over POST.
+v7.1 sends raw 160×120 RGB565 pixels (38,400 bytes) over one persistent WebSocket.
+The relay converts them and encodes a high-quality JPEG with sharp (quality 90),
+so the camera skips its ~29 ms lossy encode and there is no per-frame HTTP round trip.
+If the WebSocket is unavailable, the firmware falls back to the original HTTPS
+POST path with on-device JPEG. Send `FORMAT,jpeg` over serial to use on-device
+JPEG on the WebSocket too (lower bandwidth, slightly softer).
 
-| Firmware | Payload | notes |
+| Mode | Payload | notes |
 | --- | --- | --- |
-| v7 (default) | ~3 KB/frame | persistent `/ws/camera`, ~15–20 fps at 160×120 |
-| v7 fallback | ~3 KB/frame | HTTPS POST if the WebSocket cannot connect |
-| fallback | 38,400 B/frame | only if JPEG compression fails |
+| v7.1 raw WS (default) | 38,400 B/frame | no on-device JPEG; server encodes at quality 90 |
+| v7.1 `FORMAT,jpeg` | ~3 KB/frame | on-device JPEG passed through |
+| POST fallback | ~3 KB/frame | HTTPS if the WebSocket cannot connect |
 
-`JPEG_QUALITY` (default `80`) trades size for sharpness; lowering it to 60–70
+`JPEG_QUALITY` (default `90` for server-side raw encoding) trades size for sharpness; lowering it to 70
 speeds up compression further but softens the picture. The relay still accepts
 raw RGB565 from older sketches.
 

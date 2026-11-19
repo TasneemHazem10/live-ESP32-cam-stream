@@ -730,16 +730,21 @@ sensorWss.on('connection', (ws) => {
   });
 });
 
-// Camera ingest: a single TLS/WebSocket connection carries many JPEG frames.
-// The camera sends a small JSON text message with geometry on connect (and
-// whenever SIZE changes), then raw JPEG bytes as binary messages. Frames go
-// straight through frameHub.ingestJpeg() with no re-encode, exactly like the
-// POST path, so browsers and WebRTC peers see identical frames.
+// Camera ingest: a single TLS/WebSocket connection carries many frames. The
+// camera sends a small JSON text message with geometry/format on connect (and
+// whenever SIZE changes), then one binary frame each. Two payloads are accepted:
+//   * "jpeg"      -> passed through untouched (on-device JPEG, fallback)
+//   * "rgb565le"  -> converted + encoded here with sharp (no lossy step on the
+//                    ESP32, so it is both faster on the camera and sharper)
 cameraWss.on('connection', (ws, req) => {
   cameraClients.add(ws);
   cameraTransport = 'ws';
-  const meta = { width: 0, height: 0, deviceId: null };
+  const meta = { width: 0, height: 0, deviceId: null, format: 'jpeg', bigEndian: false };
   let firstFrame = true;
+  let rejected = 0;
+  // Raw frames must be processed one at a time: frameHub reuses an RGBA scratch
+  // buffer, and sharp may still be reading it when the next frame arrives.
+  let pending = Promise.resolve();
 
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -750,8 +755,17 @@ cameraWss.on('connection', (ws, req) => {
 
   console.log(`[camera] ws ingest connected (client=${cameraClients.size})`);
 
+  const firstAccepted = (bytes) => {
+    if (!firstFrame) return;
+    firstFrame = false;
+    console.log(`[camera] first ws frame accepted (${bytes} bytes, ${meta.format})`);
+  };
+  const reject = (error) => {
+    if (rejected++ % 50 === 0) console.warn(`[camera] ws frame rejected: ${error.message}`);
+  };
+
   ws.on('message', (data, isBinary) => {
-    // Text frames are JSON metadata; binary frames are one raw JPEG each.
+    // Text frames are JSON metadata; binary frames carry one image each.
     if (!isBinary || typeof data === 'string') {
       try {
         const msg = JSON.parse(typeof data === 'string' ? data : data.toString('utf8'));
@@ -760,25 +774,36 @@ cameraWss.on('connection', (ws, req) => {
         if (Number.isInteger(w) && w >= 16 && w <= 4096) meta.width = w;
         if (Number.isInteger(h) && h >= 16 && h <= 4096) meta.height = h;
         if (typeof msg.device === 'string') meta.deviceId = msg.device.slice(0, 48);
+        if (msg.format) {
+          const parsed = parseFormat(msg.format);
+          meta.format = parsed.raw;
+          meta.bigEndian = parsed.bigEndian;
+        }
       } catch {
         /* ignore malformed metadata */
       }
       return;
     }
 
-    const jpeg = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    try {
-      frameHub.ingestJpeg(jpeg, {
-        width: meta.width || undefined,
-        height: meta.height || undefined,
-        deviceId: meta.deviceId,
-      });
-      if (firstFrame) {
-        firstFrame = false;
-        console.log(`[camera] first ws frame accepted (${jpeg.length} bytes)`);
+    const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const base = {
+      width: meta.width || undefined,
+      height: meta.height || undefined,
+      deviceId: meta.deviceId,
+    };
+
+    if (meta.format === 'rgb565') {
+      pending = pending
+        .then(() => frameHub.ingestRgb565(payload, { ...base, bigEndian: meta.bigEndian }))
+        .then(() => firstAccepted(payload.length))
+        .catch(reject);
+    } else {
+      try {
+        frameHub.ingestJpeg(payload, base);
+        firstAccepted(payload.length);
+      } catch (error) {
+        reject(error);
       }
-    } catch (error) {
-      console.warn(`[camera] ws frame rejected: ${error.message}`);
     }
   });
 
