@@ -286,6 +286,42 @@ async function main() {
       return '45%, mirror on/off, grid on/off';
     });
 
+    await test('zoom out / zoom in controls resize the live frame', async () => {
+      const initial = (await state(page)).zoom;
+      assert(Math.abs(initial - 0.8) < 0.001, `initial zoom is ${initial}`);
+      assert((await page.locator('#zoom-value').textContent())?.trim() === '80%', 'zoom label missing');
+
+      await page.locator('#zoom-out-btn').click();
+      await page.waitForTimeout(120);
+      const zoomedOut = (await state(page)).zoom;
+      assert(Math.abs(zoomedOut - 0.75) < 0.001, `zoom out failed: ${zoomedOut}`);
+      assert((await page.locator('#zoom-value').textContent())?.trim() === '75%', 'zoom out label missing');
+
+      await page.locator('#zoom-in-btn').click();
+      await page.waitForTimeout(120);
+      const zoomedIn = (await state(page)).zoom;
+      assert(Math.abs(zoomedIn - 0.8) < 0.001, `zoom in failed: ${zoomedIn}`);
+
+      // Clamp at the lower bound and disable the matching control.
+      let guard = 0;
+      while (!(await page.locator('#zoom-out-btn').isDisabled()) && guard < 12) {
+        await page.locator('#zoom-out-btn').click();
+        guard += 1;
+      }
+      assert((await state(page)).zoom === 0.5, 'zoom did not clamp at the minimum');
+      assert(await page.locator('#zoom-out-btn').isDisabled(), 'zoom-out button not disabled at minimum');
+      assert(!(await page.locator('#zoom-in-btn').isDisabled()), 'zoom-in button disabled at minimum');
+
+      // Restore a comfortable default for the remaining checks.
+      guard = 0;
+      while ((await page.locator('#zoom-value').textContent())?.trim() !== '80%' && guard < 20) {
+        await page.locator('#zoom-in-btn').click();
+        guard += 1;
+      }
+      assert((await state(page)).zoom === 0.8, 'zoom did not restore to 80%');
+      return '80% → 75% → 80%, clamped at 50%';
+    });
+
     await test('snapshot downloads a real PNG', async () => {
       await page.locator('.effect-item[data-effect="thermal"]').click();
       await page.waitForTimeout(200);

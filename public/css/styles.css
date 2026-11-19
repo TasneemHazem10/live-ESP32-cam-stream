@@ -2480,6 +2480,48 @@ body[data-lang="ar"] .hero h1 {
   height: 16px;
 }
 
+.zoom-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(4, 4, 14, 0.5);
+}
+
+.zoom-actions .icon-btn {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.zoom-actions .icon-btn:hover {
+  transform: none;
+}
+
+.zoom-actions .icon-btn:disabled,
+.zoom-actions .icon-btn:disabled:hover {
+  opacity: 0.35;
+  cursor: not-allowed;
+  color: var(--text-soft);
+  background: transparent;
+  transform: none;
+}
+
+.zoom-value {
+  min-width: 44px;
+  color: var(--cyan);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  user-select: none;
+}
+
 .intensity-row {
   display: grid;
   grid-template-columns: auto minmax(140px, 1fr);

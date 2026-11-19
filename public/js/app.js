@@ -70,11 +70,18 @@ const SENSOR_DEFS = {
 
 const PRIMARY_SENSORS = ['temperature', 'humidity', 'soil', 'light', 'airQuality', 'motion'];
 
+// The 160x120 sensor frame is upscaled to fill the cinema stage. Keep the whole
+// frame visible (contain, never crop) while allowing the magnification to drop.
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 1;
+const ZOOM_STEP = 0.05;
+
 const state = {
   effect: 'raw',
   intensity: 1,
   mirror: false,
   grid: false,
+  zoom: 0.8,
   mode: 'ws',
   phase: 'connecting',
   tour: false,
@@ -129,6 +136,9 @@ const dom = {
   snapshotBtn: $('snapshot-btn'),
   mirrorBtn: $('mirror-btn'),
   gridBtn: $('grid-btn'),
+  zoomOutBtn: $('zoom-out-btn'),
+  zoomInBtn: $('zoom-in-btn'),
+  zoomValue: $('zoom-value'),
   fullscreenBtn: $('fullscreen-btn'),
   videoGrid: $('video-grid'),
   sensorPill: $('sensor-pill'),
@@ -179,7 +189,7 @@ function prepareCanvas(canvas, ctx) {
   return { width, height };
 }
 
-function drawFrameTo(canvas, ctx, source, sourceWidth, sourceHeight) {
+function drawFrameTo(canvas, ctx, source, sourceWidth, sourceHeight, zoom = 1) {
   const { width, height } = prepareCanvas(canvas, ctx);
   if (!width || !height) return;
 
@@ -187,7 +197,9 @@ function drawFrameTo(canvas, ctx, source, sourceWidth, sourceHeight) {
   ctx.fillStyle = '#02040b';
   ctx.fillRect(0, 0, width, height);
 
-  const scale = Math.min(width / sourceWidth, height / sourceHeight);
+  // Contain keeps the full 4:3 sensor frame; zoom < 1 only reduces how far that
+  // frame is magnified to fill the stage (it never crops the field of view).
+  const scale = Math.min(width / sourceWidth, height / sourceHeight) * zoom;
   const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
   const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
   const x = Math.round((width - drawWidth) / 2);
@@ -232,8 +244,8 @@ function renderFrame(source, meta = {}) {
     }
   }
 
-  drawFrameTo(dom.videoCanvas, videoCtx, filterCanvas, workWidth, workHeight);
-  drawFrameTo(dom.heroCanvas, heroCtx, filterCanvas, workWidth, workHeight);
+  drawFrameTo(dom.videoCanvas, videoCtx, filterCanvas, workWidth, workHeight, state.zoom);
+  drawFrameTo(dom.heroCanvas, heroCtx, filterCanvas, workWidth, workHeight, 1);
 
   state.lastFrameMeta = { width: sourceWidth, height: sourceHeight };
   dom.metricResolution.textContent = `${sourceWidth}×${sourceHeight}`;
@@ -346,6 +358,15 @@ function setIntensity(percent) {
   state.intensity = value / 100;
   if (dom.intensity) dom.intensity.value = String(value);
   if (dom.intensityValue) dom.intensityValue.textContent = `${Math.round(value)}%`;
+}
+
+function setZoom(value) {
+  const requested = Number(value);
+  const next = clamp(Number.isFinite(requested) ? requested : 1, ZOOM_MIN, ZOOM_MAX);
+  state.zoom = Math.round(next * 100) / 100;
+  if (dom.zoomValue) dom.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
+  if (dom.zoomOutBtn) dom.zoomOutBtn.disabled = state.zoom <= ZOOM_MIN;
+  if (dom.zoomInBtn) dom.zoomInBtn.disabled = state.zoom >= ZOOM_MAX;
 }
 
 function updateTourButton() {
@@ -1165,6 +1186,9 @@ function setupStageControls() {
     dom.gridBtn.setAttribute('aria-pressed', String(state.grid));
   });
 
+  dom.zoomOutBtn?.addEventListener('click', () => setZoom(state.zoom - ZOOM_STEP));
+  dom.zoomInBtn?.addEventListener('click', () => setZoom(state.zoom + ZOOM_STEP));
+
   dom.snapshotBtn?.addEventListener('click', () => {
     if (!state.frameReady || !dom.videoCanvas) {
       showToast(t('studio.waitTitle'), 'warn');
@@ -1487,6 +1511,7 @@ window.addEventListener('langchange', () => {
 
 renderEffects();
 setIntensity(100);
+setZoom(state.zoom);
 updateTourButton();
 updateModeUI();
 renderSensorCards(PRIMARY_SENSORS);

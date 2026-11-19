@@ -236,6 +236,15 @@
                     <button class="mode-btn" data-mode="livekit" type="button">LiveKit</button>
                   </div>
                   <div class="icon-actions">
+                    <div class="zoom-actions" role="group" data-i18n-title="studio.zoom" title="Zoom">
+                      <button class="icon-btn" id="zoom-out-btn" type="button" data-i18n-title="studio.zoomOut" title="Zoom out" aria-label="Zoom out">
+                        <svg class="icon"><use href="#i-zoom-out"></use></svg>
+                      </button>
+                      <span class="zoom-value" id="zoom-value">80%</span>
+                      <button class="icon-btn" id="zoom-in-btn" type="button" data-i18n-title="studio.zoomIn" title="Zoom in" aria-label="Zoom in">
+                        <svg class="icon"><use href="#i-zoom-in"></use></svg>
+                      </button>
+                    </div>
                     <button class="icon-btn" id="snapshot-btn" type="button" data-i18n-title="studio.snapshot" title="Snapshot" aria-label="Snapshot">
                       <svg class="icon"><use href="#i-snapshot"></use></svg>
                     </button>
@@ -486,6 +495,8 @@
         <symbol id="i-snapshot" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4V8Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
         <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 6 3 12l5 6M16 6l5 6-5 6"/></symbol>
         <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+        <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5M8 11h6"/></symbol>
+        <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5M8 11h6M11 8v6"/></symbol>
         <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
         <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
         <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
