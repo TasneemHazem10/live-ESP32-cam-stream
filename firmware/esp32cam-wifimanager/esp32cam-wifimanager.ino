@@ -1,6 +1,6 @@
 /*
  * ============================================================================
- *  MIRSAD — ESP32-CAM live streamer  (v6, runtime-tunable software JPEG)
+ *  MIRSAD — ESP32-CAM live streamer  (v7, persistent WebSocket uplink)
  * ----------------------------------------------------------------------------
  *  Board   : AI-Thinker ESP32-CAM (RHYX-M21-45 2 MP camera module)
  *  Sensor  : RGB565 capture (this sensor has NO hardware JPEG mode), compressed
@@ -10,6 +10,9 @@
  *        ESP32-CAM --HTTPS POST /api/upload-frame--> Render relay
  *        Render relay --WSS /ws/frames (JPEG)------> browser
  *
+ *  Uplink: one persistent WebSocket carries many JPEG frames (no per-frame
+ *          HTTP round trip). If the WS is unavailable, the original HTTPS POST
+ *          path is used automatically, so the camera is never offline.
  *  Live tuning over USB serial at 115200 (no reflash needed):
  *    WIFI,<ssid>,<password>   store any 2.4 GHz network
  *    QUALITY,<30-100>         JPEG quality (lower = faster, softer)
@@ -25,6 +28,7 @@
 #include <esp_camera.h>
 #include <img_converters.h>
 #include <Preferences.h>
+#include <esp_system.h>   // esp_random() for WebSocket masking keys
 
 Preferences prefs;
 
@@ -35,6 +39,8 @@ Preferences prefs;
 #define SERVER_HOST "live-esp32-cam-stream.onrender.com"
 #define SERVER_PORT 443
 #define UPLOAD_PATH "/api/upload-frame"
+#define WS_PATH "/ws/camera"
+#define WS_RETRY_MS 5000
 #define UPLOAD_TOKEN ""
 #define DEVICE_ID "ESP32-CAM-RHYX"
 
@@ -85,6 +91,13 @@ WiFiClientSecure tlsClient;
 HTTPClient uploadHttp;
 String uploadUrlJpeg;
 String uploadUrlRgb;
+
+// Primary uplink: one TLS connection upgraded to WebSocket, reused for every
+// frame. POST stays configured as the automatic fallback.
+WiFiClientSecure camTls;
+bool wsConnected = false;
+unsigned long wsLastRetryAt = 0;
+static bool wsSend(uint8_t *data, size_t len, uint8_t opcode);
 
 uint8_t jpegQuality = DEFAULT_QUALITY;
 framesize_t frameSize = DEFAULT_SIZE;
@@ -279,6 +292,12 @@ void handleSerialConfig() {
             prefs.putUChar("size", (uint8_t)applied);
             prefs.end();
             Serial.printf("[serial] frame size = %dx%d\n", frameW, frameH);
+            if (wsConnected) {
+              char meta[96];
+              int n = snprintf(meta, sizeof(meta), "{\"w\":%d,\"h\":%d,\"device\":\"%s\"}",
+                               frameW, frameH, DEVICE_ID);
+              wsSend((uint8_t *)meta, (size_t)n, 0x1);
+            }
           }
         }
       }
@@ -331,7 +350,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(false);
   delay(200);
-  Serial.println("[boot] MIRSAD camera v6.1 (persistent TLS keep-alive)");
+  Serial.println("[boot] MIRSAD camera v7 (persistent WebSocket uplink)");
 
   prefs.begin("mirsad", true);
   jpegQuality = prefs.getUChar("quality", DEFAULT_QUALITY);
@@ -370,6 +389,8 @@ void setup() {
 
   tlsClient.setInsecure();
   tlsClient.setHandshakeTimeout(20);
+  camTls.setInsecure();
+  camTls.setHandshakeTimeout(20);
   uploadHttp.setConnectTimeout(10000);
   uploadHttp.setTimeout(15000);
   uploadHttp.setReuse(true);
@@ -382,7 +403,162 @@ void setup() {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Upload one frame
+// 6b. Persistent WebSocket uplink (primary; POST remains the fallback)
+// ---------------------------------------------------------------------------
+
+static bool tlsWriteAll(const uint8_t *buf, size_t len) {
+  size_t off = 0;
+  unsigned long t0 = millis();
+  while (off < len && millis() - t0 < 10000) {
+    int n = camTls.write(buf + off, len - off);
+    if (n > 0) {
+      off += (size_t)n;
+    } else if (n < 0) {
+      return false;
+    } else {
+      delay(1);
+    }
+  }
+  return off == len;
+}
+
+// Send one WebSocket frame. Client frames MUST be masked, so the payload is
+// XOR-ed in place — callers only pass buffers they are about to discard.
+static bool wsSend(uint8_t *data, size_t len, uint8_t opcode) {
+  if (!camTls.connected()) return false;
+
+  uint8_t header[14];
+  size_t h = 0;
+  header[h++] = 0x80 | opcode;                 // FIN + opcode
+  if (len < 126) {
+    header[h++] = 0x80 | (uint8_t)len;         // MASK bit set
+  } else if (len <= 0xffff) {
+    header[h++] = 0x80 | 126;
+    header[h++] = (uint8_t)(len >> 8);
+    header[h++] = (uint8_t)len;
+  } else {
+    header[h++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--) header[h++] = (uint8_t)(len >> (8 * i));
+  }
+  uint8_t mask[4] = {
+    (uint8_t)esp_random(), (uint8_t)esp_random(),
+    (uint8_t)esp_random(), (uint8_t)esp_random()
+  };
+  memcpy(header + h, mask, 4);
+  h += 4;
+  if (!tlsWriteAll(header, h)) return false;
+  for (size_t i = 0; i < len; i++) data[i] ^= mask[i & 3];
+  return len == 0 || tlsWriteAll(data, len);
+}
+
+static bool wsReadExact(uint8_t *buf, size_t len, unsigned long timeoutMs) {
+  size_t got = 0;
+  unsigned long t0 = millis();
+  while (got < len && millis() - t0 < timeoutMs) {
+    int avail = camTls.available();
+    if (avail > 0) {
+      int n = camTls.read(buf + got, min((size_t)avail, len - got));
+      if (n > 0) got += (size_t)n;
+      else if (n < 0) return false;
+    } else {
+      delay(1);
+    }
+  }
+  return got == len;
+}
+
+// Drain frames from the server. No video flows camera-ward, but Cloudflare /
+// Render may send pings, and they must be answered to keep the socket alive.
+static bool wsPump() {
+  unsigned long t0 = millis();
+  while (camTls.available() > 0 && millis() - t0 < 40) {
+    uint8_t h[2];
+    if (!wsReadExact(h, 2, 100)) return false;
+    uint8_t opcode = h[0] & 0x0f;
+    bool masked = (h[1] & 0x80) != 0;
+    uint64_t len = h[1] & 0x7f;
+    if (len == 126) {
+      uint8_t x[2];
+      if (!wsReadExact(x, 2, 100)) return false;
+      len = ((uint64_t)x[0] << 8) | x[1];
+    } else if (len == 127) {
+      uint8_t x[8];
+      if (!wsReadExact(x, 8, 100)) return false;
+      len = 0;
+      for (int i = 0; i < 8; i++) len = (len << 8) | x[i];
+    }
+    uint8_t mask[4] = {0, 0, 0, 0};
+    if (masked && !wsReadExact(mask, 4, 100)) return false;
+    if (len > 2048) return false;              // server never sends large frames here
+    uint8_t payload[2048];
+    if (len && !wsReadExact(payload, (size_t)len, 300)) return false;
+    if (masked) for (size_t i = 0; i < len; i++) payload[i] ^= mask[i & 3];
+    if (opcode == 0x8) return false;           // close
+    if (opcode == 0x9) {                       // ping -> pong
+      if (!wsSend(payload, (size_t)len, 0xA)) return false;
+    }
+  }
+  return camTls.connected();
+}
+
+static void wsDisconnect() {
+  wsConnected = false;
+  camTls.stop();
+}
+
+static bool wsConnect() {
+  if (!camTls.connect(SERVER_HOST, SERVER_PORT)) {
+    Serial.println("[ws] TLS connect failed");
+    return false;
+  }
+
+  String path = String(WS_PATH) + "?device=" + DEVICE_ID;
+  if (strlen(UPLOAD_TOKEN) > 0) path += String("&token=") + UPLOAD_TOKEN;
+  String req =
+    String("GET ") + path + " HTTP/1.1\r\n" +
+    "Host: " + SERVER_HOST ":" + SERVER_PORT + "\r\n" +
+    "Upgrade: websocket\r\n" +
+    "Connection: Upgrade\r\n" +
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+    "Sec-WebSocket-Version: 13\r\n" +
+    "\r\n";
+  if (!tlsWriteAll((const uint8_t *)req.c_str(), req.length())) {
+    wsDisconnect();
+    return false;
+  }
+
+  String header;
+  unsigned long t0 = millis();
+  while (millis() - t0 < 15000) {
+    while (camTls.available() > 0) {
+      char c = (char)camTls.read();
+      header += c;
+      if (header.length() > 4096) { wsDisconnect(); return false; }
+    }
+    if (header.indexOf("\r\n\r\n") >= 0) break;
+    delay(10);
+  }
+  if (!header.startsWith("HTTP/1.1 101")) {
+    Serial.printf("[ws] upgrade failed: %s\n", header.substring(0, 60).c_str());
+    wsDisconnect();
+    return false;
+  }
+
+  char meta[96];
+  int n = snprintf(meta, sizeof(meta), "{\"w\":%d,\"h\":%d,\"device\":\"%s\"}",
+                   frameW, frameH, DEVICE_ID);
+  if (!wsSend((uint8_t *)meta, (size_t)n, 0x1)) {
+    wsDisconnect();
+    return false;
+  }
+
+  wsConnected = true;
+  Serial.printf("[ws] connected: %s (%dx%d)\n", path.c_str(), frameW, frameH);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// 7. Upload one frame (fallback path)
 // ---------------------------------------------------------------------------
 
 bool postFrame(const uint8_t *data, size_t len, bool isJpeg) {
@@ -421,6 +597,7 @@ void loop() {
   handleSerialConfig();
 
   if (WiFi.status() != WL_CONNECTED) {
+    if (wsConnected) wsDisconnect();
     if (millis() - lastReconnectAt > 3000) {
       lastReconnectAt = millis();
       Serial.println("[wifi] lost -> reconnecting");
@@ -431,6 +608,19 @@ void loop() {
   }
 
   unsigned long now = millis();
+
+  // Keep the persistent uplink healthy. Retry every few seconds when down;
+  // HTTP POST continues to carry frames until the WebSocket comes back.
+  if (!wsConnected && now - wsLastRetryAt >= WS_RETRY_MS) {
+    wsLastRetryAt = now;
+    wsConnect();
+  }
+  bool usingWs = wsConnected;
+  if (usingWs && !wsPump()) {
+    Serial.println("[ws] link lost -> falling back to POST");
+    wsDisconnect();
+    usingWs = false;
+  }
 
   if (now - lastStatsAt >= 5000) {
     float seconds = (now - lastStatsAt) / 1000.0f;
@@ -450,7 +640,9 @@ void loop() {
     lastStatsAt = now;
   }
 
-  if (now - lastFrameAt < FRAME_INTERVAL_MS) {
+  // WebSocket is pipelined: no per-frame response to wait for, so run as fast
+  // as capture + JPEG encoding allow. POST stays rate-limited to TARGET_FPS.
+  if (!usingWs && now - lastFrameAt < FRAME_INTERVAL_MS) {
     delay(2);
     return;
   }
@@ -484,10 +676,16 @@ void loop() {
   size_t bytes;
   t0 = millis();
   if (compressed && jpg && jpgLen >= 100 && jpgLen < 400000) {
-    ok = postFrame(jpg, jpgLen, true);
     bytes = jpgLen;
+    if (usingWs) {
+      ok = wsSend(jpg, jpgLen, 0x2);   // masks jpg in place; do not POST it on failure
+      if (!ok) wsDisconnect();
+    } else {
+      ok = postFrame(jpg, jpgLen, true);
+    }
   } else {
-    Serial.println("[jpeg] compression failed -> sending RGB565");
+    // WS ingest expects JPEG only; RGB565 must use the POST fallback path.
+    Serial.println("[jpeg] compression failed -> sending RGB565 via POST");
     ok = postFrame(fb->buf, rgbBytes, false);
     bytes = rgbBytes;
   }

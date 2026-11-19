@@ -23,6 +23,9 @@ const app = express();
 const server = http.createServer(app);
 const frameClients = new Set();
 const sensorClients = new Set();
+const cameraClients = new Set();
+// Which uplink the camera is currently using: 'http' (POST fallback) or 'ws'.
+let cameraTransport = 'http';
 const startedAt = Date.now();
 
 app.set('trust proxy', config.trustProxy);
@@ -514,7 +517,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
     local: isLocalClient(req),
     serverTime: Date.now(),
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
-    camera: frameHub.getStatus(),
+    camera: { ...frameHub.getStatus(), transport: cameraTransport },
     sensors: sensorStore.getStatus(),
     clients: {
       frames: frameClients.size,
@@ -545,6 +548,7 @@ app.get('/api/status', asyncRoute(async (req, res) => {
       frame: '/api/frame.jpg',
       mjpeg: '/stream.mjpeg',
       wsFrames: '/ws/frames',
+      wsCamera: '/ws/camera',
       sensors: '/api/sensors',
       sensorsWs: '/ws/sensors',
       webrtc: '/api/rtc/offer',
@@ -630,6 +634,9 @@ app.use((error, req, res, next) => {
 
 const frameWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
 const sensorWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024, perMessageDeflate: false });
+// Camera ingest stream. One TLS connection carries many JPEG frames, avoiding a
+// fresh request/response round trip per frame (~250 ms on the ESP32).
+const cameraWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024, perMessageDeflate: false });
 
 function originAllowed(req) {
   if (config.allowedOrigins === '*') return true;
@@ -723,6 +730,67 @@ sensorWss.on('connection', (ws) => {
   });
 });
 
+// Camera ingest: a single TLS/WebSocket connection carries many JPEG frames.
+// The camera sends a small JSON text message with geometry on connect (and
+// whenever SIZE changes), then raw JPEG bytes as binary messages. Frames go
+// straight through frameHub.ingestJpeg() with no re-encode, exactly like the
+// POST path, so browsers and WebRTC peers see identical frames.
+cameraWss.on('connection', (ws, req) => {
+  cameraClients.add(ws);
+  cameraTransport = 'ws';
+  const meta = { width: 0, height: 0, deviceId: null };
+  let firstFrame = true;
+
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    meta.deviceId = url.searchParams.get('device')?.slice(0, 48) || null;
+  } catch {
+    /* keep whatever metadata the camera sends */
+  }
+
+  console.log(`[camera] ws ingest connected (client=${cameraClients.size})`);
+
+  ws.on('message', (data, isBinary) => {
+    // Text frames are JSON metadata; binary frames are one raw JPEG each.
+    if (!isBinary || typeof data === 'string') {
+      try {
+        const msg = JSON.parse(typeof data === 'string' ? data : data.toString('utf8'));
+        const w = Number(msg.w ?? msg.width);
+        const h = Number(msg.h ?? msg.height);
+        if (Number.isInteger(w) && w >= 16 && w <= 4096) meta.width = w;
+        if (Number.isInteger(h) && h >= 16 && h <= 4096) meta.height = h;
+        if (typeof msg.device === 'string') meta.deviceId = msg.device.slice(0, 48);
+      } catch {
+        /* ignore malformed metadata */
+      }
+      return;
+    }
+
+    const jpeg = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    try {
+      frameHub.ingestJpeg(jpeg, {
+        width: meta.width || undefined,
+        height: meta.height || undefined,
+        deviceId: meta.deviceId,
+      });
+      if (firstFrame) {
+        firstFrame = false;
+        console.log(`[camera] first ws frame accepted (${jpeg.length} bytes)`);
+      }
+    } catch (error) {
+      console.warn(`[camera] ws frame rejected: ${error.message}`);
+    }
+  });
+
+  const onClose = () => {
+    cameraClients.delete(ws);
+    if (cameraClients.size === 0) cameraTransport = 'http';
+    console.log(`[camera] ws ingest disconnected (client=${cameraClients.size})`);
+  };
+  ws.on('close', onClose);
+  ws.on('error', onClose);
+});
+
 server.on('upgrade', (req, socket, head) => {
   let pathname = '';
   try {
@@ -744,6 +812,26 @@ server.on('upgrade', (req, socket, head) => {
   }
   if (pathname === '/ws/sensors') {
     sensorWss.handleUpgrade(req, socket, head, (ws) => sensorWss.emit('connection', ws, req));
+    return;
+  }
+  if (pathname === '/ws/camera') {
+    // Same token rule as POST /api/upload-frame. Query params are used because
+    // the ESP32 WebSocket client cannot set custom headers during handshake.
+    if (hasUploadAuth()) {
+      let url;
+      try {
+        url = new URL(req.url, 'http://localhost');
+      } catch {
+        url = null;
+      }
+      const token = url?.searchParams.get('token') || url?.searchParams.get('apiKey');
+      if (!token || token !== config.uploadToken) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+    cameraWss.handleUpgrade(req, socket, head, (ws) => cameraWss.emit('connection', ws, req));
     return;
   }
   socket.destroy();
