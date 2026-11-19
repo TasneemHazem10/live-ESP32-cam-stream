@@ -4,12 +4,12 @@ Two Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | Capture 320×240 **raw RGB565** at 5 fps and POST it to the relay; reuses the saved Wi-Fi, portal only if none is stored |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | v5: capture 320×240 RGB565, compress to **JPEG on-device**, POST it (~8–13 KB/frame); any 2.4 GHz Wi‑Fi via serial command or portal |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
 Both boards only make **outbound** connections — no public IP, no port forwarding, no broker
-account. The camera POSTs frames to the relay on Render, which encodes them to JPEG and pushes
-them to the dashboard:
+account. The camera POSTs JPEG frames to the relay on Render, which passes them through and
+pushes them to the dashboard:
 
 ```text
 ESP32-CAM  --HTTPS POST /api/upload-frame-->  Render relay  --WSS /ws/frames-->  browser
@@ -86,20 +86,24 @@ There is exactly one line to change before flashing: the relay host.
 #define UPLOAD_PATH "/api/upload-frame"
 #define UPLOAD_TOKEN ""        // leave empty unless UPLOAD_TOKEN is set on Render
 #define DEVICE_ID "ESP32-CAM-RHYX"
-#define TARGET_FPS 5           // raw RGB565 is heavy — see bandwidth below
+#define TARGET_FPS 10          // capture target; actual rate is lower (see below)
+#define JPEG_QUALITY 80        // 60–70 is faster but softer
 ```
 
-Frame geometry is fixed by the handover spec and must not be changed:
+Frame geometry:
 
 ```cpp
 #define FRAME_W 320
 #define FRAME_H 240
-#define FRAME_BYTES (FRAME_W * FRAME_H * 2)   // 153,600 bytes/frame
 ```
 
-The sketch configures the sensor as `PIXFORMAT_RGB565` / `FRAMESIZE_QVGA` and uploads the raw
-buffer as `application/octet-stream` with `?w=320&h=240&format=rgb565le`. The relay does the
-RGB565 → JPEG conversion, because the RHYX-M21-45 has no hardware JPEG encoder.
+The RHYX-M21-45 has **no hardware JPEG** (`PIXFORMAT_JPEG` fails with `0x106` and
+reboot-loops). v5 captures `PIXFORMAT_RGB565` / `FRAMESIZE_QVGA` and calls
+`frame2jpg()` from `img_converters.h` to compress on the ESP32, then uploads
+`application/octet-stream` to `?w=320&h=240&format=jpeg`. The relay passes JPEG
+through untouched; if compression fails, the sketch falls back to raw RGB565
+(`?format=rgb565le`). Colour is tuned with contrast/saturation/sharpness `1`,
+auto white balance, auto exposure and auto gain.
 
 Wi-Fi configuration (any 2.4 GHz network, no portal needed):
 
@@ -121,17 +125,19 @@ at `192.168.4.1`, which has a **180-second timeout** before retrying.
 
 ### Bandwidth and frame rate
 
-Raw RGB565 is 153,600 bytes per frame — roughly 20× a JPEG. At the default 5 fps that is about
-**750 KB/s (2.7 GB per hour)** of upload, so watch the data plan.
+v5 uploads a ~8–13 KB JPEG per frame (instead of 153,600 bytes of raw RGB565),
+so bandwidth is modest. The end-to-end rate is currently about **0.5 fps**,
+limited by on-device capture/JPEG encode plus the HTTPS POST round-trip, not by
+browser delivery. WebRTC (with Metered TURN) only affects relay → browser.
 
-| `TARGET_FPS` | Upload | Per hour |
+| Firmware | Payload | Notes |
 | --- | --- | --- |
-| 2 | 300 KB/s | ~1.1 GB |
-| 5 (default) | 750 KB/s | ~2.7 GB |
-| 10 | 1.5 MB/s | ~5.4 GB |
+| v5 (default) | ~8–13 KB/frame | software JPEG on-device; relay passes through |
+| fallback | 153,600 B/frame | only if `frame2jpg()` fails |
 
-Lower `TARGET_FPS` and re-flash if that is too much. The relay also accepts hardware JPEG
-(`?format=jpeg`, ~8 KB/frame) if a module with a JPEG encoder is fitted later.
+To trade sharpness for speed, lower `JPEG_QUALITY` (e.g. 60–70) or the frame
+size, then rebuild and re-flash. The relay still accepts raw RGB565 from older
+sketches.
 
 The camera LED is not used by this sketch.
 

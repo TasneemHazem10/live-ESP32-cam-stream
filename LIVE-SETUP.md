@@ -7,11 +7,11 @@ dashboard *and* the API from the same process — there is no second host.
 ```text
 ESP32-CAM (RHYX-M21-45)                    Render (Node relay)                  Browser
 ───────────────────────                    ───────────────────                  ───────
-320x240 RGB565, 153,600 B/frame  ─HTTPS──▶ POST /api/upload-frame   ─WSS────▶    /ws/frames  (default)
-5 fps by default                 POST      RGB565 → JPEG (sharp)    ─WebRTC─▶    /api/rtc/offer (data channel)
-saved Wi-Fi, no captive portal             /api/frame.jpg                      MJPEG, HTTP poll
+320x240 RGB565 → software JPEG  ─HTTPS──▶ POST /api/upload-frame   ─WSS────▶    /ws/frames  (default)
+~8-13 KB/frame (v5 firmware)     POST      JPEG passed through      ─WebRTC─▶    /api/rtc/offer (data channel)
+saved Wi-Fi, or config portal              /api/frame.jpg                      MJPEG, HTTP poll
                                            /stream.mjpeg                       filters, effects
-                                           TURN credentials ← Metered
+                                           TURN credentials ← Metered (enabled)
 ```
 
 No MQTT, no public broker, no port forwarding, no account on the camera side,
@@ -19,8 +19,8 @@ no separate static host, no CORS hop.
 
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
-| `server/` + `public/` | **Render** (only service) | serves the dashboard, ingests frames, encodes JPEG, broadcasts WS / WebRTC / MJPEG |
-| `firmware/esp32cam-wifimanager/` | ESP32-CAM | captures and POSTs raw RGB565 |
+| `server/` + `public/` | **Render** (only service) | serves the dashboard, ingests frames, broadcasts WS / WebRTC / MJPEG |
+| `firmware/esp32cam-wifimanager/` | ESP32-CAM | captures RGB565, compresses to JPEG on-device, POSTs it (v5) |
 | `tools/` | your PC | build, flash, simulate, verify |
 
 The dashboard and the API share an origin, so `public/js/env.js` is empty:
@@ -61,7 +61,7 @@ Notes:
 ```powershell
 $env:SERVER_URL = "https://live-esp32-cam-stream.onrender.com"
 
-# the exact request the firmware makes (153,600-byte RGB565):
+# the camera upload path (v5 sends JPEG; this tool sends raw RGB565 as fallback):
 node tools/esp-post-check.js        # or: npm run test:ingest
 
 # continuous synthetic stream in another terminal:
@@ -88,6 +88,12 @@ connection cannot complete. With Metered configured, both peers connect
 outbound to the TURN relay and the data channel works. Without it, the
 dashboard's WebRTC mode times out after 20 s and falls back to WebSocket.
 (The camera upload itself never uses TURN.)
+
+> **Already configured.** `server/config.js` ships working Metered defaults, so
+> WebRTC works on this deployment without adding anything in Render. `/api/status`
+> reports `"turn": true, "iceSource": "metered"`. The steps below are only for
+> rotating to your own Metered app; environment variables always override the
+> defaults.
 
 1. Sign up at <https://www.metered.ca/stun-turn> (free tier) and create an app.
 2. Copy the app **subdomain** (e.g. `myapp.metered.live`) and the **API key**.
@@ -184,19 +190,20 @@ You do **not** have to use `WEAO9A85`; choose whatever network you want.
 Serial Monitor at `115200`:
 
 ```text
-[boot] MIRSAD camera v3 (HTTP RGB565)
+[boot] MIRSAD camera v5 (RGB565 -> software JPEG)
 [wifi] connected: 192.168.1.24
-[relay] https://live-esp32-cam-stream.onrender.com:443/api/upload-frame?w=320&h=240&format=rgb565le&device=ESP32-CAM-RHYX
+[relay] https://live-esp32-cam-stream.onrender.com:443/api/upload-frame?w=320&h=240&format=jpeg&device=ESP32-CAM-RHYX
 [relay] awake (HTTP 200)
 [post] first frame accepted by the relay
-[stats] 4.8 fps, 720 KB/s, 0 failed
+[stats] 0.5 fps, 5 KB/s, 0 failed
 ```
 
 Then open <https://live-esp32-cam-stream.onrender.com>. `/api/status` shows the
 truth:
 
 ```json
-"camera": { "connected": true, "source": "live", "fps": 4.8, "width": 320, "height": 240 },
+"camera": { "connected": true, "source": "live", "fps": 0.5, "width": 320, "height": 240, "jpegBytes": 9000 },
+"webrtc": { "available": true, "turn": true, "iceSource": "metered" },
 "config": { "jpegEncoder": "sharp" }
 ```
 
@@ -204,17 +211,19 @@ truth:
 
 ## Data cost (important on a MiFi)
 
-Raw RGB565 is 153,600 bytes per frame — about 20× a JPEG.
+v5 compresses each 320×240 RGB565 frame (153,600 bytes) to a ~8–13 KB JPEG on
+the ESP32 before upload, so bandwidth is small. The relay passes that JPEG
+through unchanged — no second encode. If `frame2jpg()` ever fails, the firmware
+falls back to raw RGB565 (`?format=rgb565le`) at 153,600 bytes/frame.
 
-| `TARGET_FPS` | Upload | Per hour |
+| Firmware | Payload | notes |
 | --- | --- | --- |
-| 2 | 300 KB/s | ~1.1 GB |
-| 5 (default) | 750 KB/s | ~2.7 GB |
-| 10 | 1.5 MB/s | ~5.4 GB |
+| v5 (default) | ~8–13 KB/frame | software JPEG on-device, faster upload |
+| fallback | 153,600 B/frame | only if JPEG compression fails |
 
-Change `TARGET_FPS` in the sketch and re-flash if that is too much. The relay
-also accepts hardware JPEG (`?format=jpeg`) at ~8 KB/frame if the module turns
-out to support it.
+`JPEG_QUALITY` (default `80`) trades size for sharpness; lowering it to 60–70
+speeds up compression further but softens the picture. The relay still accepts
+raw RGB565 from older sketches.
 
 ---
 
@@ -228,10 +237,12 @@ out to support it.
 | Site says "waiting" but `/api/status` shows fps | browser cached an old page | hard reload; `env.js` must be `''` |
 | `jpegEncoder` is `jpeg-js` | sharp failed to load on the host | check the deploy log; `npm ci` must install `sharp` for linux-x64 |
 | Image is blue where it should be red | byte order | send `?format=rgb565be` instead of `rgb565le` |
-| Picture is a slideshow | RGB565 is large; TLS upload dominates | lower resolution or use JPEG mode |
+| Picture is a slideshow | camera capture + on-device JPEG encode is the limit (~0.5 fps) | lower `JPEG_QUALITY`/frame size and re-flash, or improve Wi-Fi signal |
+| `[camera] init failed 0x106` / `JPEG format is not supported` | sensor has no hardware JPEG; only v5 works | flash v5 (`RGB565 -> software JPEG`) |
+| `[camera] init failed 0x105` / `Camera probe failed` | camera ribbon cable loose | unplug USB, reseat ribbon, power-cycle |
 | WebSocket never connects, HTTP works | a proxy in front of the relay buffers WS | the dashboard falls back to polling automatically |
-| WebRTC connects but no picture | no TURN, or the data channel never opened | set the Metered variables; check `/api/rtc/config` |
-| `Upload error: connection refused` in the log | still the **old** firmware | flash v3 — see `[boot] MIRSAD camera v3` |
+| WebRTC connects but no picture | no camera frames reaching the relay, or no TURN | check `/api/status` camera first, then `/api/rtc/config` |
+| `Upload error: connection refused` in the log | still the **old** firmware | flash v5 — see `[boot] MIRSAD camera v5` |
 
 ---
 
