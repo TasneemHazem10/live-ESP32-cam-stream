@@ -7,8 +7,8 @@ dashboard *and* the API from the same process — there is no second host.
 ```text
 ESP32-CAM (RHYX-M21-45)                    Render (Node relay)                  Browser
 ───────────────────────                    ───────────────────                  ───────
-320x240 RGB565 → software JPEG  ─HTTPS──▶ POST /api/upload-frame   ─WSS────▶    /ws/frames  (default)
-~8-13 KB/frame (v5 firmware)     POST      JPEG passed through      ─WebRTC─▶    /api/rtc/offer (data channel)
+160x120 RGB565 → software JPEG  ─WSS────▶ /ws/camera (primary)      ─WSS────▶    /ws/frames  (default)
+~3 KB/frame (v7 firmware)        HTTP POST  POST /api/upload-frame    ─WebRTC─▶    /api/rtc/offer (data channel)
 saved Wi-Fi, or config portal              /api/frame.jpg                      MJPEG, HTTP poll
                                            /stream.mjpeg                       filters, effects
                                            TURN credentials ← Metered (enabled)
@@ -20,7 +20,7 @@ no separate static host, no CORS hop.
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
 | `server/` + `public/` | **Render** (only service) | serves the dashboard, ingests frames, broadcasts WS / WebRTC / MJPEG |
-| `firmware/esp32cam-wifimanager/` | ESP32-CAM | captures RGB565, compresses to JPEG on-device, POSTs it (v5) |
+| `firmware/esp32cam-wifimanager/` | ESP32-CAM | captures RGB565, compresses to JPEG on-device, streams over `/ws/camera` with HTTP POST fallback (v7) |
 | `tools/` | your PC | build, flash, simulate, verify |
 
 The dashboard and the API share an origin, so `public/js/env.js` is empty:
@@ -190,19 +190,17 @@ You do **not** have to use `WEAO9A85`; choose whatever network you want.
 Serial Monitor at `115200`:
 
 ```text
-[boot] MIRSAD camera v5 (RGB565 -> software JPEG)
-[wifi] connected: 192.168.1.24
-[relay] https://live-esp32-cam-stream.onrender.com:443/api/upload-frame?w=320&h=240&format=jpeg&device=ESP32-CAM-RHYX
-[relay] awake (HTTP 200)
-[post] first frame accepted by the relay
-[stats] 0.5 fps, 5 KB/s, 0 failed
+[boot] MIRSAD camera v7 (persistent WebSocket uplink)
+[wifi] connected: 192.168.1.2
+[ws] connected: /ws/camera?device=ESP32-CAM-RHYX (160x120)
+[stats] 17.8 fps, 43 KB/s, 0 failed | cap=18 enc=29 post=8 ms
 ```
 
 Then open <https://live-esp32-cam-stream.onrender.com>. `/api/status` shows the
 truth:
 
 ```json
-"camera": { "connected": true, "source": "live", "fps": 0.5, "width": 320, "height": 240, "jpegBytes": 9000 },
+"camera": { "connected": true, "source": "live", "fps": 17.8, "width": 160, "height": 120, "jpegBytes": 3000, "transport": "ws" },
 "webrtc": { "available": true, "turn": true, "iceSource": "metered" },
 "config": { "jpegEncoder": "sharp" }
 ```
@@ -211,15 +209,18 @@ truth:
 
 ## Data cost (important on a MiFi)
 
-v5 compresses each 320×240 RGB565 frame (153,600 bytes) to a ~8–13 KB JPEG on
-the ESP32 before upload, so bandwidth is small. The relay passes that JPEG
-through unchanged — no second encode. If `frame2jpg()` ever fails, the firmware
-falls back to raw RGB565 (`?format=rgb565le`) at 153,600 bytes/frame.
+v7 compresses each 160×120 RGB565 frame (38,400 bytes) to a ~3 KB JPEG on the
+ESP32 and pushes it over one persistent WebSocket, so there is no per-frame HTTP
+round trip. The relay passes that JPEG through unchanged — no second encode.
+If the WebSocket is unavailable, the firmware automatically falls back to the
+original HTTPS POST path; if `frame2jpg()` ever fails, it sends raw RGB565
+(`?format=rgb565le`) over POST.
 
 | Firmware | Payload | notes |
 | --- | --- | --- |
-| v5 (default) | ~8–13 KB/frame | software JPEG on-device, faster upload |
-| fallback | 153,600 B/frame | only if JPEG compression fails |
+| v7 (default) | ~3 KB/frame | persistent `/ws/camera`, ~15–20 fps at 160×120 |
+| v7 fallback | ~3 KB/frame | HTTPS POST if the WebSocket cannot connect |
+| fallback | 38,400 B/frame | only if JPEG compression fails |
 
 `JPEG_QUALITY` (default `80`) trades size for sharpness; lowering it to 60–70
 speeds up compression further but softens the picture. The relay still accepts

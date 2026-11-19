@@ -4,15 +4,17 @@ Two Arduino sketches:
 
 | Sketch | Board | Purpose |
 | --- | --- | --- |
-| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | v5: capture 320×240 RGB565, compress to **JPEG on-device**, POST it (~8–13 KB/frame); any 2.4 GHz Wi‑Fi via serial command or portal |
+| [`esp32cam-wifimanager/esp32cam-wifimanager.ino`](esp32cam-wifimanager/esp32cam-wifimanager.ino) | AI-Thinker ESP32-CAM + RHYX-M21-45 2 MP | v7: capture 160×120 RGB565, compress to **JPEG on-device**, stream over persistent `/ws/camera` (~3 KB/frame, ~15–20 fps) with HTTPS POST fallback; any 2.4 GHz Wi‑Fi via serial command or portal |
 | [`esp32-sensor-node/esp32-sensor-node.ino`](esp32-sensor-node/esp32-sensor-node.ino) | ESP32 DevKit 38-pin (ESP32-WROOM-32) | Read sensors and POST JSON every 2 s |
 
 Both boards only make **outbound** connections — no public IP, no port forwarding, no broker
-account. The camera POSTs JPEG frames to the relay on Render, which passes them through and
-pushes them to the dashboard:
+account. The camera streams JPEG frames over one persistent WebSocket to the relay on Render,
+which passes them through and pushes them to the dashboard (HTTPS POST remains the automatic
+fallback):
 
 ```text
-ESP32-CAM  --HTTPS POST /api/upload-frame-->  Render relay  --WSS /ws/frames-->  browser
+ESP32-CAM  --WSS /ws/camera-->  Render relay  --WSS /ws/frames-->  browser
+           --HTTP POST (fallback) /api/upload-frame-->
 ```
 
 > The relay accepts `X-Upload-Token` and `X-Api-Key`, plus `Authorization: Bearer ...`,
@@ -132,12 +134,17 @@ browser delivery. WebRTC (with Metered TURN) only affects relay → browser.
 
 | Firmware | Payload | Notes |
 | --- | --- | --- |
-| v5 (default) | ~8–13 KB/frame | software JPEG on-device; relay passes through |
-| fallback | 153,600 B/frame | only if `frame2jpg()` fails |
+| v7 (default) | ~3 KB/frame | persistent `/ws/camera`; relay passes through |
+| v7 fallback | ~3 KB/frame | HTTPS POST if the WebSocket is unavailable |
+| fallback | 38,400 B/frame | only if `frame2jpg()` fails |
 
-To trade sharpness for speed, lower `JPEG_QUALITY` (e.g. 60–70) or the frame
-size, then rebuild and re-flash. The relay still accepts raw RGB565 from older
-sketches.
+Speed can be tuned **live over USB serial at 115200 — no re-flash needed**:
+`QUALITY,30-100` (JPEG quality, stored in NVS) and
+`SIZE,qqvga|hqvga|qvga` (160×120 / 240×176 / 320×240). The `[stats]` line shows
+capture / encode / send times. At 160×120 the sensor and software JPEG encoder
+cap the stream at roughly 15–20 fps; lowering quality below ~45 does not help
+because encode time stays around 28 ms. The relay still accepts raw RGB565 from
+older sketches.
 
 The camera LED is not used by this sketch.
 

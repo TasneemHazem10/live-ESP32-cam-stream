@@ -201,7 +201,17 @@ readings.
 
 ## 3. WebSockets
 
-Both sockets share the HTTP server and support automatic reconnection from the dashboard.
+Three sockets share the HTTP server and support automatic reconnection from the dashboard.
+
+### `WS /ws/camera` (camera ingest)
+
+The camera's primary uplink. Connect to `wss://<host>/ws/camera?device=<id>`
+(plus `&token=` when `UPLOAD_TOKEN` is configured). Send one JSON text message
+with geometry, e.g. `{"w":160,"h":120,"device":"ESP32-CAM-RHYX"}`, then one raw
+JPEG per **masked binary** message. Frames are published through the same
+`frameHub` as the POST path, so viewers and WebRTC peers see identical JPEGs.
+The connection is one-way; the relay never sends video back to the camera.
+`POST /api/upload-frame` remains supported as an automatic fallback.
 
 ### `WS /ws/frames`
 
@@ -459,6 +469,7 @@ into the room data channel with topic `sensors` as
     "frame": "/api/frame.jpg",
     "mjpeg": "/stream.mjpeg",
     "wsFrames": "/ws/frames",
+    "wsCamera": "/ws/camera",
     "sensors": "/api/sensors",
     "sensorsWs": "/ws/sensors",
     "webrtc": "/api/rtc/offer",
