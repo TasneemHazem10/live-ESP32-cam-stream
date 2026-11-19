@@ -101,9 +101,10 @@ static bool wsSend(uint8_t *data, size_t len, uint8_t opcode);
 static bool sendWsMeta();
 
 uint8_t jpegQuality = DEFAULT_QUALITY;
-// Raw RGB565 over the WebSocket avoids the lossy on-device JPEG step: the
-// relay encodes with sharp at higher quality, and the camera saves ~29 ms.
-bool wsRaw = true;
+// Optional raw RGB565 over WebSocket. On this ESP32 a 38 KB raw frame takes
+// ~390 ms to send over TLS, so on-device JPEG (default) is far faster.
+// Kept for experimentation: FORMAT,raw over serial switches to it.
+bool wsRaw = false;
 framesize_t frameSize = DEFAULT_SIZE;
 int frameW = 320;
 int frameH = 240;
@@ -369,7 +370,7 @@ void setup() {
   prefs.begin("mirsad", true);
   jpegQuality = prefs.getUChar("quality", DEFAULT_QUALITY);
   framesize_t saved = (framesize_t)prefs.getUChar("size", (uint8_t)DEFAULT_SIZE);
-  wsRaw = prefs.getBool("wsraw", true);
+  wsRaw = prefs.getBool("wsraw", false);
   prefs.end();
   if (jpegQuality < 30 || jpegQuality > 100) jpegQuality = DEFAULT_QUALITY;
   if (!validSize(saved)) saved = DEFAULT_SIZE;

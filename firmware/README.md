@@ -139,7 +139,9 @@ browser delivery. WebRTC (with Metered TURN) only affects relay → browser.
 | fallback | 38,400 B/frame | only if `frame2jpg()` fails |
 
 Speed can be tuned **live over USB serial at 115200 — no re-flash needed**:
-`QUALITY,30-100` (JPEG quality, stored in NVS) and
+`QUALITY,30-100` (JPEG quality; 90 keeps ~17 fps and is sharper than 65),
+`FORMAT,raw|jpeg` (raw sends pixels to the server for sharp encoding, but a
+38 KB frame takes ~390 ms on this board, so JPEG is the default), and
 `SIZE,qqvga|hqvga|qvga` (160×120 / 240×176 / 320×240). The `[stats]` line shows
 capture / encode / send times. At 160×120 the sensor and software JPEG encoder
 cap the stream at roughly 15–20 fps; lowering quality below ~45 does not help
