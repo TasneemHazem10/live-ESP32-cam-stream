@@ -167,8 +167,11 @@ function prepareCanvas(canvas, ctx) {
   // rate on large displays without adding real detail.
   const dpr = Math.min(1.5, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
-  const width = Math.max(1, Math.round((rect.width || canvas.clientWidth || 320) * dpr));
-  const height = Math.max(1, Math.round((rect.height || canvas.clientHeight || 240) * dpr));
+  // clientWidth/Height are layout sizes: unlike getBoundingClientRect they are
+  // not affected by the reveal transform, so the canvas does not get sized to
+  // a mid-animation scale.
+  const width = Math.max(1, Math.round((canvas.clientWidth || rect.width || 320) * dpr));
+  const height = Math.max(1, Math.round((canvas.clientHeight || rect.height || 240) * dpr));
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
