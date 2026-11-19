@@ -31,7 +31,7 @@ if (-not $Port) {
   Write-Host "Using $Port (pass -Port COMx to choose another)."
 }
 
-$esptool = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools\esptool*\esptool.exe') -ErrorAction SilentlyContinue |
+$esptool = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools') -Recurse -Filter esptool.exe -ErrorAction SilentlyContinue |
   Select-Object -First 1
 if (-not $esptool) { throw 'esptool.exe not found - install the ESP32 core with arduino-cli first.' }
 

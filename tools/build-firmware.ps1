@@ -24,9 +24,9 @@ $core = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\hardware\esp32'
 $coreVersion = (Get-ChildItem $core -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
 Write-Host "ESP32 core: $coreVersion"
 
-# partitions.csv in the sketch folder is used automatically, but the core also
-# needs PSRAM enabled for the camera buffers.
-$fqbn = 'esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=custom,FlashMode=dio,CPUFreq=240,FlashFreq=40'
+# Use the standard Huge APP partition scheme (3 MB app); the core also needs
+# PSRAM enabled for the camera buffers.
+$fqbn = 'esp32:esp32:esp32:PSRAM=enabled,PartitionScheme=huge_app,FlashMode=dio,CPUFreq=240,FlashFreq=40'
 
 Write-Host "Compiling $sketch ..."
 & $cli compile --fqbn $fqbn --output-dir $out $sketch

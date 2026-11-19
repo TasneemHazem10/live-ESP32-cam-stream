@@ -165,6 +165,10 @@ board **AI Thinker ESP32-CAM**, **PSRAM: Enabled**, then Upload.
 
 When it finishes: remove `GPIO0` from `GND`, tap `RST`.
 
+You can also set the network without the portal: open a serial monitor at
+115200 baud and send `WIFI,<ssid>,<password>`. The board saves it, reboots,
+and joins that network on any router.
+
 Wi-Fi credentials are stored on the board. If the saved network is still in
 range, no portal appears. If there is no saved network — or that network is
 gone — the board opens `ESP32-CAM-Config` at `192.168.4.1` so you can pick

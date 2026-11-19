@@ -19,8 +19,9 @@
  *      Render dashboard -> your service -> the URL under the name,
  *      e.g. "mirsad-live-ab12.onrender.com"
  *
- *  Wi-Fi: the board reuses the network it already saved, so no captive portal
- *  appears. If there is no saved network it opens "ESP32-CAM-Config".
+ *  Wi-Fi: send WIFI,<ssid>,<password> over the USB serial port at 115200 to
+ *  store any 2.4 GHz network (works on any router, no portal needed). If no
+ *  serial network is stored, the board falls back to "ESP32-CAM-Config".
  *
  *  Expected serial output at 115200 baud:
  *      [boot] MIRSAD camera v3 (HTTP RGB565)
@@ -37,6 +38,9 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp_camera.h>
+#include <Preferences.h>
+
+Preferences prefs;
 
 // ---------------------------------------------------------------------------
 // 1. Relay (Render) — EDIT THIS ONE LINE
@@ -105,6 +109,72 @@ uint32_t framesSent = 0;
 uint32_t framesFailed = 0;
 uint32_t statsFrames = 0;
 uint32_t statsBytes = 0;
+
+#define WIFI_CMD_PREFIX "WIFI,"
+#define WIFI_CONNECT_TIMEOUT_MS 25000
+
+// ---------------------------------------------------------------------------
+// 4b. Wi-Fi stored over USB serial (works on any 2.4 GHz network)
+// ---------------------------------------------------------------------------
+
+bool applySerialWifi() {
+  prefs.begin("mirsad", true);
+  String ssid = prefs.getString("ssid", "");
+  String pass = prefs.getString("pass", "");
+  prefs.end();
+  if (ssid.length() == 0) return false;
+
+  Serial.printf("[wifi] using serial network: %s\n", ssid.c_str());
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleep(false);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  unsigned long started = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - started < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(250);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("[wifi] connected: " + WiFi.localIP().toString());
+    return true;
+  }
+  Serial.println("[wifi] serial network failed -> opening portal");
+  return false;
+}
+
+void handleSerialConfig() {
+  static String line;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (line.length() > 0) {
+        line.trim();
+        if (line.startsWith(WIFI_CMD_PREFIX)) {
+          String rest = line.substring(strlen(WIFI_CMD_PREFIX));
+          int sep = rest.indexOf(',');
+          if (sep > 0) {
+            String ssid = rest.substring(0, sep);
+            String pass = rest.substring(sep + 1);
+            ssid.trim();
+            pass.trim();
+            if (ssid.length() > 0) {
+              prefs.begin("mirsad", false);
+              prefs.putString("ssid", ssid);
+              prefs.putString("pass", pass);
+              prefs.end();
+              Serial.printf("[serial] saved Wi-Fi '%s'; restarting...\n", ssid.c_str());
+              delay(200);
+              ESP.restart();
+            }
+          }
+        }
+      }
+      line = "";
+    } else if (line.length() < 160) {
+      line += c;
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 5. Helper: wait for the relay to answer (wakes a sleeping Render instance)
@@ -199,18 +269,24 @@ void setup() {
     sensor->set_saturation(sensor, 0);
   }
 
-  // Reuses the Wi-Fi already stored on the board; the portal only opens when
-  // there is no saved network at all.
-  WiFiManager wm;
-  wm.setConnectTimeout(20);
-  wm.setConfigPortalTimeout(180);
-  Serial.println("[wifi] connecting (portal 'ESP32-CAM-Config' if no saved network)...");
-  if (!wm.autoConnect("ESP32-CAM-Config")) {
-    Serial.println("[wifi] failed -> restarting");
-    ESP.restart();
+  // A network stored over USB serial wins; otherwise use the WiFiManager portal.
+  Serial.println("[serial] send WIFI,<ssid>,<password> to change network");
+  if (!applySerialWifi()) {
+    WiFiManager wm;
+    wm.setConnectTimeout(20);
+    wm.setConfigPortalTimeout(180);
+    prefs.begin("mirsad", true);
+    bool hadSerialNetwork = prefs.getString("ssid", "").length() > 0;
+    prefs.end();
+    if (hadSerialNetwork) wm.resetSettings();  // failed network -> open portal now
+    Serial.println("[wifi] connecting (portal 'ESP32-CAM-Config' if no saved network)...");
+    if (!wm.autoConnect("ESP32-CAM-Config")) {
+      Serial.println("[wifi] failed -> restarting");
+      ESP.restart();
+    }
+    WiFi.setSleep(false);
+    Serial.println("[wifi] connected: " + WiFi.localIP().toString());
   }
-  WiFi.setSleep(false);
-  Serial.println("[wifi] connected: " + WiFi.localIP().toString());
 
   tlsClient.setInsecure();            // Render's certificate is valid; no CA bundle on the board
   tlsClient.setHandshakeTimeout(20);
@@ -271,6 +347,8 @@ bool postFrame(const uint8_t *data, size_t len) {
 // ---------------------------------------------------------------------------
 
 void loop() {
+  handleSerialConfig();
+
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - lastReconnectAt > 3000) {
       lastReconnectAt = millis();

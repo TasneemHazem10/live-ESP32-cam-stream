@@ -101,18 +101,23 @@ The sketch configures the sensor as `PIXFORMAT_RGB565` / `FRAMESIZE_QVGA` and up
 buffer as `application/octet-stream` with `?w=320&h=240&format=rgb565le`. The relay does the
 RGB565 → JPEG conversion, because the RHYX-M21-45 has no hardware JPEG encoder.
 
-First boot:
+Wi-Fi configuration (any 2.4 GHz network, no portal needed):
 
-1. Flash the sketch, remove `GPIO0` from `GND`, press **RST**, open Serial Monitor at 115200.
-2. The board prints `[wifi] connected: 192.168.x.x` using its stored credentials.
-3. It pings the relay (`[relay] awake (HTTP 200)`) — Render's free tier may take up to a minute
+1. Open Serial Monitor at **115200 baud** and send:
+
+   ```text
+   WIFI,YourNetworkName,YourPassword
+   ```
+
+2. The board replies `[serial] saved Wi-Fi 'YourNetworkName'; restarting...` and reboots.
+3. It prints `[wifi] using serial network: ...` then `[wifi] connected: 192.168.x.x`.
+4. It pings the relay (`[relay] awake (HTTP 200)`) — Render's free tier may take up to a minute
    to wake up, which is why this happens before streaming.
-4. `[post] first frame accepted by the relay` means the dashboard goes **LIVE**.
-5. Only if no network is stored does the **`ESP32-CAM-Config`** hotspot appear. Join it, choose
-   your Wi-Fi, and the board starts streaming. Credentials survive reboots.
+5. `[post] first frame accepted by the relay` means the dashboard goes **LIVE**.
 
-The portal uses a **180-second timeout**; if it expires, the board restarts and tries again.
-To force it later, erase the Wi-Fi settings (**Tools → Erase Flash → All Flash Contents**).
+The credentials survive reboots and work on any network; send another `WIFI,...` line to change
+them. If no serial network is stored, the board falls back to the **`ESP32-CAM-Config`** hotspot
+at `192.168.4.1`, which has a **180-second timeout** before retrying.
 
 ### Bandwidth and frame rate
 
