@@ -190,7 +190,7 @@
                   <span class="device-orb"><svg class="icon"><use href="#i-camera"></use></svg></span>
                   <div>
                     <strong data-i18n="studio.device">ESP32-CAM</strong>
-                    <span data-i18n="studio.model">RHYX-M21-45 · 320×240</span>
+                    <span data-i18n="studio.model">RHYX-M21-45 · 160×120</span>
                   </div>
                 </div>
                 <div class="stage-badges">
@@ -261,7 +261,7 @@
                 <div><span data-i18n="metric.fps">الإطارات/ث</span><b id="metric-fps">--</b></div>
                 <div><span data-i18n="metric.latency">التأخير</span><b id="metric-latency">--</b></div>
                 <div><span data-i18n="metric.bitrate">معدل البث</span><b id="metric-bitrate">--</b></div>
-                <div><span data-i18n="metric.resolution">الدقة</span><b id="metric-resolution">320×240</b></div>
+                <div><span data-i18n="metric.resolution">الدقة</span><b id="metric-resolution">160×120</b></div>
                 <div><span data-i18n="metric.frames">الإطارات</span><b id="metric-frames">--</b></div>
               </div>
             </div>
@@ -284,44 +284,6 @@
                 <span data-i18n="studio.note">كل المعالجة تتم محليًا داخل المتصفح — لا تُرسل الصور إلى أي خدمة خارجية.</span>
               </div>
             </aside>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="capabilities">
-        <div class="container">
-          <div class="section-head reveal">
-            <div>
-              <span class="kicker" data-i18n="cap.kicker">القدرات</span>
-              <h2 data-i18n="cap.title">من الإشارة إلى القرار</h2>
-            </div>
-            <p data-i18n="cap.sub">سلسلة كاملة مصممة للعمل فوق شبكات المنازل والمؤسسات — دون الحاجة إلى IP عام للكاميرا.</p>
-          </div>
-
-          <div class="cap-grid">
-            <article class="cap-card glass reveal" style="--i: 0">
-              <span class="cap-number">01</span>
-              <span class="cap-icon cyan"><svg class="icon"><use href="#i-bolt"></use></svg></span>
-              <h3 data-i18n="cap.1.title">بث منخفض التأخير</h3>
-              <p data-i18n="cap.1.body">يُحوَّل إطار RGB565 الخام إلى JPEG على الخادم، ثم يُوزَّع عبر WebSocket أو MJPEG أو WebRTC.</p>
-              <span class="cap-tags"><i>RGB565</i><i>JPEG</i><i>WebRTC</i></span>
-            </article>
-
-            <article class="cap-card glass reveal" style="--i: 1">
-              <span class="cap-number">02</span>
-              <span class="cap-icon lime"><svg class="icon"><use href="#i-sparkles"></use></svg></span>
-              <h3 data-i18n="cap.2.title">رؤية قابلة للتفسير</h3>
-              <p data-i18n="cap.2.body">ثمانية مرشحات فورية: مؤشر الماء، صحة النبات، خريطة حرارية، رؤية ليلية، حواف، وتدرج سينمائي.</p>
-              <span class="cap-tags"><i>NDWI</i><i>Thermal</i><i>Sobel</i></span>
-            </article>
-
-            <article class="cap-card glass reveal" style="--i: 2">
-              <span class="cap-number">03</span>
-              <span class="cap-icon violet"><svg class="icon"><use href="#i-activity"></use></svg></span>
-              <h3 data-i18n="cap.3.title">دمج المستشعرات</h3>
-              <p data-i18n="cap.3.body">حرارة، رطوبة، تربة، إضاءة، جودة هواء وحركة — تصل كل ثانيتين وتُعرض كرسوم متحركة.</p>
-              <span class="cap-tags"><i>ESP32</i><i>JSON</i><i>WebSocket</i></span>
-            </article>
           </div>
         </div>
       </section>
@@ -367,6 +329,44 @@
         </div>
       </section>
 
+      <section class="section" id="capabilities">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <span class="kicker" data-i18n="cap.kicker">القدرات</span>
+              <h2 data-i18n="cap.title">من الإشارة إلى القرار</h2>
+            </div>
+            <p data-i18n="cap.sub">سلسلة كاملة مصممة للعمل فوق شبكات المنازل والمؤسسات — دون الحاجة إلى IP عام للكاميرا.</p>
+          </div>
+
+          <div class="cap-grid">
+            <article class="cap-card glass reveal" style="--i: 0">
+              <span class="cap-number">01</span>
+              <span class="cap-icon cyan"><svg class="icon"><use href="#i-bolt"></use></svg></span>
+              <h3 data-i18n="cap.1.title">بث منخفض التأخير</h3>
+              <p data-i18n="cap.1.body">يُحوَّل إطار RGB565 الخام إلى JPEG على الخادم، ثم يُوزَّع عبر WebSocket أو MJPEG أو WebRTC.</p>
+              <span class="cap-tags"><i>RGB565</i><i>JPEG</i><i>WebRTC</i></span>
+            </article>
+
+            <article class="cap-card glass reveal" style="--i: 1">
+              <span class="cap-number">02</span>
+              <span class="cap-icon lime"><svg class="icon"><use href="#i-sparkles"></use></svg></span>
+              <h3 data-i18n="cap.2.title">رؤية قابلة للتفسير</h3>
+              <p data-i18n="cap.2.body">ثمانية مرشحات فورية: مؤشر الماء، صحة النبات، خريطة حرارية، رؤية ليلية، حواف، وتدرج سينمائي.</p>
+              <span class="cap-tags"><i>NDWI</i><i>Thermal</i><i>Sobel</i></span>
+            </article>
+
+            <article class="cap-card glass reveal" style="--i: 2">
+              <span class="cap-number">03</span>
+              <span class="cap-icon violet"><svg class="icon"><use href="#i-activity"></use></svg></span>
+              <h3 data-i18n="cap.3.title">دمج المستشعرات</h3>
+              <p data-i18n="cap.3.body">حرارة، رطوبة، تربة، إضاءة، جودة هواء وحركة — تصل كل ثانيتين وتُعرض كرسوم متحركة.</p>
+              <span class="cap-tags"><i>ESP32</i><i>JSON</i><i>WebSocket</i></span>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <section class="section" id="architecture">
         <div class="container">
           <div class="section-head reveal">
@@ -378,15 +378,15 @@
           </div>
 
           <div class="flow reveal">
-            <article class="flow-node glass">
+            <article class="flow-node glass reveal">
               <span class="flow-index">01</span>
               <span class="flow-icon cyan"><svg class="icon"><use href="#i-camera"></use></svg></span>
               <h3 data-i18n="arch.1.title">ESP32-CAM</h3>
-              <p data-i18n="arch.1.body">يلتقط 320×240 RGB565 ويرسل 153.6KB لكل إطار عبر HTTP POST صادر.</p>
+              <p data-i18n="arch.1.body">يلتقط 160×120 RGB565 ويرسل JPEG عبر WebSocket صادر — دون IP عام.</p>
               <div class="flow-tags"><span data-i18n="arch.1.tag1">RHYX-M21-45</span><span data-i18n="arch.1.tag2">RGB565</span></div>
             </article>
             <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
-            <article class="flow-node glass">
+            <article class="flow-node glass reveal">
               <span class="flow-index">02</span>
               <span class="flow-icon lime"><svg class="icon"><use href="#i-render"></use></svg></span>
               <h3 data-i18n="arch.2.title">Live Relay</h3>
@@ -394,7 +394,7 @@
               <div class="flow-tags"><span data-i18n="arch.2.tag1">Render</span><span data-i18n="arch.2.tag2">Node.js</span></div>
             </article>
             <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
-            <article class="flow-node glass">
+            <article class="flow-node glass reveal">
               <span class="flow-index">03</span>
               <span class="flow-icon violet"><svg class="icon"><use href="#i-globe"></use></svg></span>
               <h3 data-i18n="arch.3.title">طبقة النقل</h3>
@@ -402,7 +402,7 @@
               <div class="flow-tags"><span data-i18n="arch.3.tag1">WebRTC</span><span data-i18n="arch.3.tag2">Metered TURN</span></div>
             </article>
             <span class="flow-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow-right"></use></svg></span>
-            <article class="flow-node glass">
+            <article class="flow-node glass reveal">
               <span class="flow-index">04</span>
               <span class="flow-icon amber"><svg class="icon"><use href="#i-monitor"></use></svg></span>
               <h3 data-i18n="arch.4.title">المتصفح</h3>

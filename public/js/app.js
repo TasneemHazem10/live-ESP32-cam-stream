@@ -163,9 +163,9 @@ let dstImageData = null;
 
 function prepareCanvas(canvas, ctx) {
   if (!canvas || !ctx) return { width: 0, height: 0 };
-  // The camera is 160x120; anything above ~1.5x device pixels just costs fill
-  // rate on large displays without adding real detail.
-  const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+  // The camera is 160x120; with the cinema-sized stage anything above ~1.25x
+  // device pixels only costs fill rate without adding real detail.
+  const dpr = Math.min(1.25, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
   // clientWidth/Height are layout sizes: unlike getBoundingClientRect they are
   // not affected by the reveal transform, so the canvas does not get sized to
@@ -665,6 +665,7 @@ function createSensorCard(key) {
   const card = document.createElement('article');
   card.className = 'sensor-card';
   card.dataset.sensor = key;
+  card.style.setProperty('--i', String(sensorCards.size));
   card.style.setProperty('--accent', def.accent);
   card.innerHTML = `
     <div class="sensor-top">
@@ -1254,6 +1255,13 @@ function setupScrollEffects() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const progress = max > 0 ? clamp((top / max) * 100, 0, 100) : 0;
       if (dom.progressBar) dom.progressBar.style.width = `${progress}%`;
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        // Background layers drift at different rates via the shared variable.
+        document.documentElement.style.setProperty(
+          '--parallax',
+          String(-Math.min(120, top * 0.04)),
+        );
+      }
       ticking = false;
     });
   };
